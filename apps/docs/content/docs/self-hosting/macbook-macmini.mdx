@@ -1,0 +1,164 @@
+---
+title: Develop on a MacBook, run on a Mac mini
+description: Keep OpenPost development local and move one verified instance to a persistent Mac mini server.
+icon: Laptop
+---
+
+Use a MacBook for development and a Mac mini for the one instance that owns real
+schedules, webhooks, connected accounts, and provider writes. This keeps the
+fast edit-and-test loop separate from the machine that must stay online.
+
+Do not run both instances as active workers for the same workspace. Two workers
+sharing the same provider accounts can publish a scheduled post or send an
+automation reply twice.
+
+## Recommended topology
+
+```text
+MacBook
+  ├─ source checkout and feature branches
+  ├─ isolated SQLite database and media
+  ├─ test provider accounts only
+  └─ local Docker Compose or development server
+
+Mac mini
+  ├─ one pinned OpenPost image
+  ├─ one persistent database and media store
+  ├─ HTTPS reverse proxy and public media URL
+  └─ the only instance with production provider accounts
+```
+
+The MacBook checkout is the source of changes. The Mac mini is the runtime for
+the reviewed revision. Keep the two data sets separate; never copy a production
+database into a development environment unless you have a private, approved
+backup and a clear reason to handle its account data.
+
+## Develop on the MacBook
+
+For a quick local installation, use a loopback-only binding and a versioned
+image:
+
+```yaml
+services:
+  openpost:
+    image: ghcr.io/getopenpost/openpost:v7.35.1
+    ports:
+      - "127.0.0.1:18080:8080"
+```
+
+Set all local URLs to `http://127.0.0.1:18080` and keep local provider
+credentials out of the production configuration. Verify the instance before
+using it:
+
+```sh
+curl -fsS http://127.0.0.1:18080/api/v1/ready
+```
+
+The response must report `"status":"ready"` and `"database":"ok"`.
+
+When developing from source, use the pinned repository toolchain described in
+[Development setup](/development/setup). A source checkout and a published
+image are different execution paths: changing source files does not change a
+running published image until you build and tag a new image.
+
+## Prepare the Mac mini
+
+Before connecting a provider, choose the final public origin and configure a
+reverse proxy. Set these values to the same HTTPS origin:
+
+```dotenv
+OPENPOST_APP_URL=https://openpost.example.com
+OPENPOST_PUBLIC_URL=https://openpost.example.com
+OPENPOST_MEDIA_URL=https://openpost.example.com/media
+```
+
+The proxy must forward `/api/v1/`, `/media/`, and ordinary app requests. Provider
+OAuth callbacks and provider media fetches must reach the Mac mini from the
+public internet. See [Reverse proxy](/self-hosting/reverse-proxy) for proxy
+trust, callback URLs, and large video uploads.
+
+Use a release tag or an image built from an exact reviewed commit. Do not use
+`latest` for the first production install or for a migration you may need to
+reproduce. Keep the image tag, source commit, Compose file, and environment
+configuration together in the deployment record.
+
+## Move an instance to the Mac mini
+
+There are two supported cases.
+
+### Case 1: Move an already-used instance
+
+Use the built-in **Settings -> Instance -> Backup and restore** flow. The ZIP
+contains the database and uploaded media, but it does not contain environment
+variables or the encryption key.
+
+1. Stop or pause production work on the source instance.
+2. Download a backup and keep it private. It contains account tokens and
+   session records.
+3. Install the same OpenPost release on the Mac mini.
+4. Copy the original `.env` values, especially
+   `OPENPOST_ENCRYPTION_KEY` and `OPENPOST_JWT_SECRET`, through a secret store.
+5. Restore the ZIP on the Mac mini and confirm the restore only after checking
+   the target paths and release.
+6. Start the Mac mini instance and check `/api/v1/ready` and the logs.
+7. Open a saved post with media and inspect one scheduled post before enabling
+   provider work.
+8. Update OAuth callback URLs in provider consoles if the public origin changed.
+9. Keep the source instance stopped or disconnected from production accounts.
+
+A restore with a different encryption key is refused because saved provider
+credentials cannot be decrypted. Reconnect a provider only when its external
+application or token was revoked during the move.
+
+### Case 2: Start production after local development
+
+Do not copy the MacBook's test database unless it is intentionally the source of
+the new instance. Start the Mac mini with an empty persistent store, create the
+first administrator, configure the public URLs, and connect the production
+accounts there. This is the safer default for a new installation.
+
+## Build and deliver a code change
+
+Keep source changes in Git and deliver an immutable image to the Mac mini:
+
+```sh
+git fetch origin main
+git checkout <reviewed-commit>
+docker buildx build \
+  --platform linux/arm64 \
+  --tag ghcr.io/<owner>/openpost:<tag> \
+  --push .
+```
+
+The exact build and registry command depends on the fork's release workflow.
+The important properties are an immutable tag, an exact source commit, and a
+recorded image digest. Do not build on the Mac mini from a moving branch while
+the instance is serving production traffic.
+
+On the Mac mini, update only after a backup:
+
+```sh
+docker compose pull openpost
+docker compose up -d openpost
+curl -fsS https://openpost.example.com/api/v1/ready
+docker compose logs --tail=100 openpost
+```
+
+The combined `all` container applies database migrations at startup. If a
+release must be rolled back, restore the database backup that matches the
+older image; an older binary may not understand a newer schema.
+
+## Operational boundaries
+
+- Keep the Mac mini's OpenPost port private behind the reverse proxy.
+- Use one production worker for each database and workspace set.
+- Back up the database, media, Compose file, image tag, and secrets together.
+- Keep `OPENPOST_ENCRYPTION_KEY` stable across restarts and restores.
+- Check `/api/v1/ready` after every restart and after every migration.
+- Test a saved post, a media asset, and a scheduled post after a restore.
+- Do not enable OAuth until the public HTTPS and media URL work from outside
+  the local network.
+- Do not treat a successful OAuth callback as proof that video publishing,
+  comments, analytics, or direct messages are enabled.
+
+For the full backup, upgrade, and recovery procedure, see [Maintenance](/self-hosting/maintenance).
