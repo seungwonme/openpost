@@ -1,0 +1,16 @@
+services:
+  openpost:
+    image: ghcr.io/getopenpost/openpost:v7.35.1
+    ports: !override
+      - "127.0.0.1:18081:8080"
+    volumes:
+      - openpost_data:/data
+    networks:
+      - aiden-edge
+
+volumes:
+  openpost_data:
+
+networks:
+  aiden-edge:
+    external: true
