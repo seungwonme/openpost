@@ -138,10 +138,10 @@ the instance is serving production traffic.
 On the Mac mini, update only after a backup:
 
 ```sh
-docker compose pull openpost
-docker compose up -d openpost
+docker compose -f docker-compose.yml -f docker-compose.macmini.yml pull openpost
+docker compose -f docker-compose.yml -f docker-compose.macmini.yml up -d openpost
 curl -fsS https://openpost.example.com/api/v1/ready
-docker compose logs --tail=100 openpost
+docker compose -f docker-compose.yml -f docker-compose.macmini.yml logs --tail=100 openpost
 ```
 
 The combined `all` container applies database migrations at startup. If a
@@ -162,3 +162,108 @@ older image; an older binary may not understand a newer schema.
   comments, analytics, or direct messages are enabled.
 
 For the full backup, upgrade, and recovery procedure, see [Maintenance](/self-hosting/maintenance).
+
+## Mac mini runtime cutover
+
+The production OpenPost runtime for this fork runs on the Mac mini. Develop over SSH in the Mac mini checkout and verify the public application through `https://openpost.aidenahn.com`.
+
+```text
+SSH -> /Users/aiden/Dev/2-area/nomadamas/12-playground/openpost
+     -> Docker Compose OpenPost (127.0.0.1:18081)
+     -> aiden-edge Docker network
+     -> Caddy gateway
+     -> macmini-services Cloudflare Tunnel
+     -> https://openpost.aidenahn.com
+```
+
+The MacBook instance is stopped. Do not run a second worker against the same workspace or provider accounts.
+
+### Mac mini deployment files
+
+- OpenPost checkout: `/Users/aiden/Dev/2-area/nomadamas/12-playground/openpost`
+- Branch: `dev/macmini-openpost`
+- Base Compose file: `docker-compose.yml` (the portable default for ordinary local users)
+- Mac mini deployment file: `docker-compose.macmini.yml` (the Mac mini-specific override)
+- Persistent volume: `openpost_openpost_data`
+- Runtime image: `ghcr.io/getopenpost/openpost:v7.35.1`
+- OpenPost host port: `127.0.0.1:18081`
+- Shared network: `aiden-edge`
+- Ingress checkout: `/Users/aiden/Dev/agent-portability`
+- Ingress tunnel: `macmini-services`
+
+The base Compose file remains portable for ordinary local users. On the Mac
+mini, always layer the Mac mini deployment file over it so the pinned image,
+private host binding, shared ingress network, and base `openpost_data` volume
+are applied together:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.macmini.yml config
+```
+
+The commands below assume the Mac mini checkout has its private `.env` file.
+Run them from that checkout; the base file's `env_file` entry is intentionally
+not copied into the repository's public documentation.
+
+Keep `.env` private. It contains the stable `OPENPOST_ENCRYPTION_KEY` and `OPENPOST_JWT_SECRET`, and must not be committed or copied into GitHub issues.
+
+### Develop and verify
+
+```sh
+ssh macmini
+cd /Users/aiden/Dev/2-area/nomadamas/12-playground/openpost
+export PATH="$HOME/.orbstack/bin:/opt/homebrew/bin:$HOME/.local/bin:$PATH"
+bun install --frozen-lockfile
+bun run build -- frontend
+bun run build -- backend
+docker compose -f docker-compose.yml -f docker-compose.macmini.yml up -d --force-recreate
+curl -fsS http://127.0.0.1:18081/api/v1/ready
+curl -fsS https://openpost.aidenahn.com/api/v1/ready
+```
+
+The public URL is the test surface. OAuth callbacks and provider media URLs continue to use `openpost.aidenahn.com`; do not rename the hostname without re-registering every provider callback.
+
+To restart the Mac mini service without changing its image or configuration,
+use the same overlay and check readiness again:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.macmini.yml restart openpost
+curl -fsS http://127.0.0.1:18081/api/v1/ready
+```
+
+### Ingress update
+
+The shared Caddy and Cloudflare configuration owns the public route:
+
+- `infra/ingress/Caddyfile`: `openpost.aidenahn.com` proxies to `openpost:8080`.
+- `infra/ingress/cloudflared.yml`: `openpost.aidenahn.com` routes to the shared gateway.
+
+After changing those files, validate and restart the shared ingress from `/Users/aiden/Dev/agent-portability`:
+
+```sh
+./ops check ingress
+./ops restart ingress
+./ops status ingress
+```
+
+### Backup before upgrades
+
+Stop provider work before a migration. Back up the persistent volume and retain the exact image tag, Compose file, and secret version together. The database and media contain provider tokens and must remain private.
+
+```sh
+mkdir -p /tmp/openpost-backup
+
+docker compose -f docker-compose.yml -f docker-compose.macmini.yml stop openpost
+
+docker run --rm \
+  -v openpost_openpost_data:/data \
+  -v /tmp/openpost-backup:/backup \
+  alpine:3.20 \
+  sh -c 'tar czf /backup/openpost-data.tgz -C /data .'
+
+sha256sum /tmp/openpost-backup/openpost-data.tgz
+```
+
+To roll back, stop OpenPost with the same Compose overlay, restore the matching
+volume backup, run the matching immutable image with the overlay, and verify
+`/api/v1/ready` before enabling provider work. Never roll back a binary across a
+schema migration without the corresponding database restore.
