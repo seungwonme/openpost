@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -28,6 +29,8 @@ const (
 	clickInsertTimeout = 250 * time.Millisecond
 )
 
+var slugPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
 type Service struct{ db *bun.DB }
 
 func NewService(db *bun.DB) *Service { return &Service{db: db} }
@@ -43,6 +46,9 @@ func (s *Service) Create(ctx context.Context, workspaceID, publicationID, rendit
 	createdByID = strings.TrimSpace(createdByID)
 	if workspaceID == "" || publicationID == "" || createdByID == "" {
 		return link, fmt.Errorf("%w: workspace, publication, and creator are required", ErrInvalidInput)
+	}
+	if len(workspaceID) > 200 || len(publicationID) > 200 || len(renditionID) > 200 || len(createdByID) > 200 {
+		return link, fmt.Errorf("%w: identifier is too long", ErrInvalidInput)
 	}
 	destinationURL, err := validateDestination(destinationURL)
 	if err != nil {
@@ -107,7 +113,7 @@ func (s *Service) ResolveAndRecord(ctx context.Context, slug, method, userAgent,
 		return "", false, errors.New("tracked link service database is unavailable")
 	}
 	slug = strings.TrimSpace(slug)
-	if slug == "" || len(slug) > 128 {
+	if !slugPattern.MatchString(slug) {
 		return "", false, fmt.Errorf("%w: slug is required", ErrInvalidInput)
 	}
 	var link models.TrackedLink
