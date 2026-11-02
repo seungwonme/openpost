@@ -1381,6 +1381,33 @@ type Publication struct {
 	UpdatedAt           time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
 }
 
+// TrackedLink is a workspace-owned redirect destination attached to a
+// publication and, optionally, one of its renditions.
+type TrackedLink struct {
+	bun.BaseModel `bun:"table:tracked_links"`
+
+	ID             string    `bun:",pk" json:"id"`
+	WorkspaceID    string    `bun:"workspace_id,notnull" json:"workspace_id"`
+	PublicationID  string    `bun:"publication_id,notnull" json:"publication_id"`
+	RenditionID    string    `bun:"rendition_id,nullzero" json:"rendition_id,omitempty"`
+	Slug           string    `bun:",unique,notnull" json:"slug"`
+	DestinationURL string    `bun:"destination_url,notnull" json:"destination_url"`
+	CreatedByID    string    `bun:"created_by_id,notnull" json:"created_by_id"`
+	IsActive       bool      `bun:"is_active,notnull,default:true" json:"is_active"`
+	CreatedAt      time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt      time.Time `bun:",nullzero,notnull,default:current_timestamp" json:"updated_at"`
+}
+
+// TrackedLinkClick is an intentionally minimal click event. Request metadata
+// is not persisted; only the link and occurrence time are retained.
+type TrackedLinkClick struct {
+	bun.BaseModel `bun:"table:tracked_link_clicks"`
+
+	ID            string    `bun:",pk" json:"id"`
+	TrackedLinkID string    `bun:"tracked_link_id,notnull" json:"tracked_link_id"`
+	OccurredAt    time.Time `bun:"occurred_at,notnull" json:"occurred_at"`
+}
+
 // SocialSet is a reusable, format-independent collection of connected accounts.
 // Publications copy its current membership into renditions when a draft is created.
 type SocialSet struct {
