@@ -18,7 +18,7 @@
 	} from '$lib/video-editor/timeline/commands/snapshot.svelte';
 	import type { TimelineSnapshot } from '$lib/video-editor/timeline/commands/types';
 	import { timelineStore } from '$lib/video-editor/timeline/stores/timeline-store.svelte';
-	import ScrubbableNumberInput from '$lib/components/editor-scrubbable-number-input.svelte';
+	import { ScrubField } from '$lib/components/editor-density';
 
 	let {
 		itemId,
@@ -96,11 +96,11 @@
 
 {#if items.length > 0}
 	<section
-		class="overflow-hidden rounded-md border border-[var(--video-editor-border)] bg-[var(--video-editor-panel)]"
+		class="border-t border-[var(--video-editor-border)]"
 		data-testid="animated-image-playback-section"
 	>
 		<h3
-			class="flex h-8 items-center gap-2 border-b border-[var(--video-editor-border)] px-2.5 text-xs font-semibold tracking-wider text-[var(--video-editor-muted)] uppercase"
+			class="flex h-8 items-center gap-2 border-b border-[var(--video-editor-border)] px-2.5 text-xs font-medium text-[var(--video-editor-muted)]"
 		>
 			<ProtectedIcon icon="editor-speed" class="size-3.5 text-[var(--video-editor-muted)]" />
 			{m.video_editor_clip_playback()}
@@ -127,19 +127,20 @@
 						onKeydown={(event) => event.stopPropagation()}
 					/>
 					<div class="relative w-[4.6rem] shrink-0">
-						<ScrubbableNumberInput
+						<ScrubField
 							ariaLabel={m.video_editor_clip_speed()}
 							value={speedValue}
 							placeholder={m.video_editor_property_mixed()}
 							min={0.1}
 							max={10}
 							step={0.01}
-							decimals={2}
-							class="h-7 w-full rounded border border-[var(--video-editor-border)] bg-[var(--video-editor-control)] py-1 pr-4 pl-1.5 text-right text-xs tabular-nums outline-none"
+							precision={2}
+							valueWidth="100%"
+							class="h-7 rounded border border-[var(--video-editor-border)] bg-[var(--video-editor-control)] py-1 pr-4 pl-1.5 text-right text-xs tabular-nums outline-none"
 							onbegin={beginGesture}
-							onlive={writeSpeed}
-							oncommit={commitSpeed}
-							oncancel={cancelGesture}
+							onValueChange={writeSpeed}
+							onValueCommit={commitSpeed}
+							onValueCancel={cancelGesture}
 						/>
 						<span
 							class="pointer-events-none absolute top-1/2 right-1.5 -translate-y-1/2 text-xs text-[var(--video-editor-muted)]"

@@ -207,6 +207,18 @@ type SavedMention struct {
 	UpdatedAt     time.Time `bun:"updated_at,notnull,default:current_timestamp"`
 }
 
+type ProviderUserResolution struct {
+	bun.BaseModel  `bun:"table:provider_user_resolutions"`
+	ID             string    `bun:",pk"`
+	WorkspaceID    string    `bun:"workspace_id,notnull"`
+	Provider       string    `bun:"provider,notnull"`
+	Handle         string    `bun:"handle,notnull"`
+	ProviderUserID string    `bun:"provider_user_id,notnull"`
+	ResolvedAt     time.Time `bun:"resolved_at,notnull"`
+	CreatedAt      time.Time `bun:"created_at,notnull,default:current_timestamp"`
+	UpdatedAt      time.Time `bun:"updated_at,notnull,default:current_timestamp"`
+}
+
 type User struct {
 	bun.BaseModel `bun:"table:users"`
 
@@ -1182,16 +1194,17 @@ type OAuthGrant struct {
 type SocialAccount struct {
 	bun.BaseModel `bun:"table:social_accounts"`
 
-	ID               string `bun:",pk" json:"id"`
-	WorkspaceID      string `bun:",notnull" json:"workspace_id"`
-	Slug             string `bun:",notnull" json:"slug"`
-	Alias            string `bun:",notnull,default:''" json:"alias,omitempty"`
-	Platform         string `bun:",notnull" json:"platform"` // 'x', 'threads', 'linkedin', 'mastodon', 'bluesky', 'instagram', 'facebook', 'youtube', 'tiktok'
-	AccountID        string `bun:",notnull" json:"account_id"`
-	AccountUsername  string `json:"account_username"`
-	AccountAvatarURL string `json:"account_avatar_url"`
-	InstanceURL      string `json:"instance_url"` // Used for Mastodon domains and Bluesky PDS
-	OAuthGrantID     string `bun:"oauth_grant_id,notnull,default:''" json:"oauth_grant_id,omitempty"`
+	ID               string    `bun:",pk" json:"id"`
+	WorkspaceID      string    `bun:",notnull" json:"workspace_id"`
+	Slug             string    `bun:",notnull" json:"slug"`
+	Alias            string    `bun:",notnull,default:''" json:"alias,omitempty"`
+	Platform         string    `bun:",notnull" json:"platform"` // 'x', 'threads', 'linkedin', 'mastodon', 'bluesky', 'instagram', 'facebook', 'youtube', 'tiktok'
+	AccountID        string    `bun:",notnull" json:"account_id"`
+	AccountUsername  string    `json:"account_username"`
+	AccountAvatarURL string    `json:"account_avatar_url"`
+	ProfileFetchedAt time.Time `bun:"profile_fetched_at,nullzero" json:"-"`
+	InstanceURL      string    `json:"instance_url"` // Used for Mastodon domains and Bluesky PDS
+	OAuthGrantID     string    `bun:"oauth_grant_id,notnull,default:''" json:"oauth_grant_id,omitempty"`
 
 	// Deprecated credential mirrors remain only for rolling migration and old
 	// test fixtures. Runtime credential reads and writes use OAuthGrant.
@@ -1205,6 +1218,10 @@ type SocialAccount struct {
 	PreflightSuccessAt  time.Time `bun:"preflight_success_at,nullzero" json:"-"`
 	PreflightWarnedAt   time.Time `bun:"preflight_warned_at,nullzero" json:"-"`
 	PreflightFailure    string    `bun:"preflight_failure,notnull,default:''" json:"-"`
+	// CredentialFailureGeneration counts healthy-to-failing credential
+	// transitions. Producers claim it atomically so one credential break
+	// notifies the reconnect-capable recipients once per generation.
+	CredentialFailureGeneration int64 `bun:"credential_failure_generation,notnull,default:0" json:"-"`
 
 	IsActive        bool      `bun:",default:true" json:"is_active"`
 	ErrorMessage    string    `json:"error_message"`

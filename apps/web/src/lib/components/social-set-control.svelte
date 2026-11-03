@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { z } from 'zod';
-	import { client, type SocialAccount } from '$lib/api/client';
+	import { client, type SocialAccount as ConnectedAccount } from '$lib/api/client';
 	import { loadWorkspaceSocialSets } from '$lib/api/performance-cache';
 	import { openPostQueryKeys } from '@openpost/query-catalog';
 	import { queryClient } from '$lib/query/client';
@@ -34,6 +34,7 @@
 	import { matchesAccountSearch } from './account-picker/search';
 	import AccountPickerSelectAll from './account-picker/select-all.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import * as Tabs from '$lib/components/ui/tabs';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Popover from '$lib/components/ui/popover';
@@ -49,6 +50,10 @@
 	import { m } from '$lib/paraglide/messages';
 	import { supportsTextCards } from '$lib/text-cards';
 
+	type SocialAccount = Pick<
+		ConnectedAccount,
+		'id' | 'platform' | 'account_id' | 'account_username' | 'account_avatar_url' | 'slug' | 'alias'
+	>;
 	type SocialSet = components['schemas']['SocialSetResponse'];
 	type SocialSetAccountInput = components['schemas']['SocialSetAccountInput'];
 	type Capability = components['schemas']['Capability'];
@@ -70,6 +75,7 @@
 	}
 
 	interface Props {
+		mode?: 'destinations' | 'filter';
 		workspaceId: string;
 		accounts: SocialAccount[];
 		capabilities?: Capability[];
@@ -86,6 +92,7 @@
 	}
 
 	let {
+		mode = 'destinations',
 		workspaceId,
 		accounts,
 		capabilities = [],
@@ -158,8 +165,15 @@
 			.filter((account): account is SocialAccount => Boolean(account))
 	);
 	const selectedSet = $derived(sets.find((set) => set.id === selectedSetId) ?? null);
+	// Read-only filter identities have no publishing configuration to edit.
+	function isConnectedAccount(account: SocialAccount): account is ConnectedAccount {
+		return 'is_active' in account;
+	}
 	const settingsEditorAccount = $derived(
-		accounts.find((account) => account.id === settingsEditorAccountId) ?? null
+		accounts.find(
+			(account): account is ConnectedAccount =>
+				account.id === settingsEditorAccountId && isConnectedAccount(account)
+		) ?? null
 	);
 	const settingsEditorFields = $derived(
 		settingsResolved?.account_id === settingsEditorAccountId
@@ -172,10 +186,16 @@
 			...(editorSegmentSettings[settingsEditorAccountId] ?? {})
 		})
 	);
-	const destinationLabel = $derived(
-		selectedSet?.name ||
-			(selectedAccountIds.length > 0 ? m.social_set_custom_selection() : m.social_set_select())
-	);
+	const destinationLabel = $derived.by(() => {
+		if (selectedSet) return selectedSet.name;
+		if (mode === 'filter') {
+			if (selectedAccountIds.length === 0) return m.analytics_all_accounts();
+			if (selectedAccountIds.length === 1 && selectedAccounts[0])
+				return accountLabel(selectedAccounts[0]);
+			return m.calendar_account_count({ count: selectedAccountIds.length });
+		}
+		return selectedAccountIds.length > 0 ? m.social_set_custom_selection() : m.social_set_select();
+	});
 	const destinationAccessibleValue = $derived.by(() => {
 		if (selectedSet) return selectedSet.name;
 		if (selectedAccounts.length === 0) return m.social_set_select();
@@ -719,7 +739,7 @@
 					variant="outline"
 					size="sm"
 					class="h-11 max-w-[min(22rem,70vw)] gap-2 px-2.5 md:h-9"
-					aria-label={`${m.compose_destinations()}: ${destinationAccessibleValue}`}
+					aria-label={`${mode === 'filter' ? m.analytics_account_filter() : m.compose_destinations()}: ${mode === 'filter' ? destinationLabel : destinationAccessibleValue}`}
 					disabled={disabled || (loading && accounts.length === 0 && sets.length === 0)}
 					data-testid="composer-account-control"
 				>
@@ -752,17 +772,19 @@
 			<div class="shrink-0 space-y-2 px-2 py-1">
 				<div>
 					<div class="flex items-center justify-between gap-3">
-						<p class="text-sm font-medium">{m.compose_destinations()}</p>
+						<p class="text-sm font-medium">
+							{mode === 'filter' ? m.analytics_account_filter() : m.compose_destinations()}
+						</p>
 						<p class="text-xs text-muted-foreground" role="status">
 							{m.media_picker_selected_count({
-								selected: selectedAccounts.length,
+								selected: mode === 'filter' ? selectedAccountIds.length : selectedAccounts.length,
 								maximum: accounts.length
 							})}
 						</p>
 					</div>
-					<p class="text-xs text-muted-foreground">
-						{m.social_set_picker_body()}
-					</p>
+					{#if mode !== 'filter'}<p class="text-xs text-muted-foreground">
+							{m.social_set_picker_body()}
+						</p>{/if}
 				</div>
 				{#if loading}<p class="text-xs text-muted-foreground" role="status">
 						{m.common_loading()}
@@ -775,7 +797,20 @@
 						placeholder={m.account_picker_search_sets()}
 					/>
 				{/if}
-				{#if onSelectAll && onClearAll}
+				{#if mode === 'filter'}
+					<label class="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
+						<Checkbox
+							checked={selectedAccountIds.length === 0}
+							aria-label={m.analytics_all_accounts()}
+							onCheckedChange={() => {
+								selectedSetId = '';
+								onClearAll?.();
+							}}
+							{disabled}
+						/>
+						{m.analytics_all_accounts()}
+					</label>
+				{:else if onSelectAll && onClearAll}
 					<!-- Composer destination list: all, subset, and none are distinct authored states. -->
 					<AccountPickerSelectAll
 						selectedCount={selectedAccounts.length}
@@ -875,17 +910,19 @@
 				</div>
 			</div>
 
-			<button
-				type="button"
-				{disabled}
-				class="flex min-h-11 w-full shrink-0 items-center rounded-md border-t px-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-				onclick={() => {
-					pickerOpen = false;
-					handleManageOpenChange(true);
-				}}
-			>
-				{m.social_set_manage()}
-			</button>
+			{#if mode !== 'filter'}
+				<button
+					type="button"
+					{disabled}
+					class="flex min-h-11 w-full shrink-0 items-center rounded-md border-t px-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+					onclick={() => {
+						pickerOpen = false;
+						handleManageOpenChange(true);
+					}}
+				>
+					{m.social_set_manage()}
+				</button>
+			{/if}
 		</Popover.Content>
 	</Popover.Root>
 
@@ -901,25 +938,32 @@
 			{/if}
 
 			<div class="grid min-h-0 flex-1 gap-5 overflow-y-auto md:grid-cols-[12rem_minmax(0,1fr)]">
-				<nav class="max-h-64 space-y-1 overflow-y-auto" aria-label={m.social_set_manage()}>
-					{#each sets as set (set.id)}
-						<Button
-							multiline
-							type="button"
-							variant={editorId === set.id ? 'secondary' : 'ghost'}
-							class="h-auto min-h-11 w-full justify-start px-3 py-2 text-left"
-							onclick={() => startEditing(set)}
-						>
-							<span class="min-w-0 truncate">{set.name}</span>
-							{#if set.is_default}
-								<span class="ml-auto text-xs text-muted-foreground">{m.social_set_default()}</span>
-							{/if}
-						</Button>
-					{/each}
+				<div class="max-h-64 space-y-1 overflow-y-auto">
+					<Tabs.Root
+						orientation="vertical"
+						value={editorId}
+						onValueChange={(next) => {
+							const set = sets.find((item) => item.id === next);
+							if (set) startEditing(set);
+						}}
+					>
+						<Tabs.List class="gap-1" aria-label={m.social_set_manage()}>
+							{#each sets as set (set.id)}
+								<Tabs.Trigger value={set.id}>
+									<span class="min-w-0 flex-1 truncate">{set.name}</span>
+									{#if set.is_default}
+										<span class="shrink-0 text-xs text-muted-foreground"
+											>{m.social_set_default()}</span
+										>
+									{/if}
+								</Tabs.Trigger>
+							{/each}
+						</Tabs.List>
+					</Tabs.Root>
 					<Button type="button" variant="outline" class="mt-2 h-11 w-full" onclick={startNewSet}>
 						{m.social_set_new()}
 					</Button>
-				</nav>
+				</div>
 
 				<div class="min-w-0 space-y-5">
 					<div class="space-y-2">

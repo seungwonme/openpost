@@ -68,6 +68,10 @@
 		unlinkItems
 	} from '$lib/video-editor/timeline/actions/items';
 	import {
+		canTrimItemToPlayhead,
+		trimItemToPlayhead
+	} from '$lib/video-editor/timeline/actions/trim-playhead';
+	import {
 		clearGeneratedItemDragData,
 		getGeneratedItemDragData,
 		type GeneratedItemDragData
@@ -388,6 +392,7 @@
 		oncutselection = () => false,
 		onpasteat = () => false,
 		onsplitselection = () => {},
+		onaddcrossfade = () => {},
 		ondeleteselection = () => {},
 		onrippledeleteselection = () => {},
 		onmixerlayoutchange = () => {},
@@ -423,6 +428,7 @@
 		oncutselection?: () => boolean;
 		onpasteat?: (frame: number, trackId: string | null) => boolean;
 		onsplitselection?: () => void;
+		onaddcrossfade?: () => void;
 		ondeleteselection?: () => void;
 		onrippledeleteselection?: () => void;
 		onmixerlayoutchange?: (open: boolean, height: number) => void;
@@ -4517,6 +4523,20 @@
 		}
 		return joinableItemNeighbors(timelineStore.items, contextPrimaryItem);
 	});
+	const contextCrossfadeAvailable = $derived.by(() => {
+		if (
+			!contextPrimaryItem ||
+			isTrackEffectivelyLocked(contextPrimaryItem.trackId, timelineStore.tracks)
+		)
+			return false;
+		const neighbors = (timelineStore.itemsByTrackId.get(contextPrimaryItem.trackId) ?? [])
+			.filter(
+				(other) => other.from >= contextPrimaryItem.from + contextPrimaryItem.durationInFrames - 1
+			)
+			.sort((a, b) => a.from - b.from);
+		const next = neighbors[0];
+		return Boolean(next && !isTrackEffectivelyLocked(next.trackId, timelineStore.tracks));
+	});
 	const captionConsolidationTarget = $derived.by<CaptionConsolidationOptions | null>(() => {
 		const lockedTrackIds = new Set(
 			effectiveMediaTracks(timelineStore.tracks)
@@ -4636,6 +4656,23 @@
 		if (clearableKeyframeCount === 0) return;
 		clearKeyframesDialogOpen = true;
 	}
+
+	const canTrimSelectedStart = $derived(
+		selectedItem ? canTrimItemToPlayhead(selectedItem.id, 'start') : false
+	);
+	const canTrimSelectedEnd = $derived(
+		selectedItem ? canTrimItemToPlayhead(selectedItem.id, 'end') : false
+	);
+
+	function trimSelectedToPlayhead(edge: 'start' | 'end'): void {
+		if (!selectedItem) return;
+		if (trimItemToPlayhead(selectedItem.id, edge)) onedit();
+	}
+
+	function trimContextItemToPlayhead(edge: 'start' | 'end'): void {
+		if (!contextPrimaryItem) return;
+		if (trimItemToPlayhead(contextPrimaryItem.id, edge)) onedit();
+	}
 </script>
 
 <svelte:window onkeydown={onPanelKeydown} />
@@ -4652,8 +4689,7 @@
 			});
 		}}
 	>
-		<span class="text-xs text-[var(--video-editor-muted)]">{m.video_editor_timeline()}</span>
-		<div class="flex items-center gap-0.5 border-l border-[var(--video-editor-border)] pl-2">
+		<div class="flex items-center gap-0.5 pl-0.5">
 			<Button
 				variant="ghost"
 				size="icon"
@@ -4668,7 +4704,7 @@
 			<Button
 				variant="ghost"
 				size="icon"
-				class="size-7 rounded data-[active=true]:bg-[var(--video-editor-selection)] data-[active=true]:text-[var(--video-editor-selection-text)]"
+				class="size-7 rounded data-[active=true]:bg-navigation-active data-[active=true]:text-navigation-active-foreground"
 				data-active={timelineStore.snapEnabled}
 				aria-pressed={timelineStore.snapEnabled}
 				aria-label={timelineStore.snapEnabled
@@ -4776,6 +4812,19 @@
 					</DropdownMenu.Trigger>
 					<DropdownMenu.Content class="video-editor-theme w-60" align="end">
 						<DropdownMenu.Item
+							disabled={!canTrimSelectedStart}
+							onSelect={() => trimSelectedToPlayhead('start')}
+						>
+							{m.video_editor_trim_start_playhead()}
+						</DropdownMenu.Item>
+						<DropdownMenu.Item
+							disabled={!canTrimSelectedEnd}
+							onSelect={() => trimSelectedToPlayhead('end')}
+						>
+							{m.video_editor_trim_end_playhead()}
+						</DropdownMenu.Item>
+						<DropdownMenu.Separator />
+						<DropdownMenu.Item
 							disabled={bentoEligibleIds.length < 2}
 							onclick={() => (bentoLayoutOpen = true)}
 						>
@@ -4804,13 +4853,6 @@
 						</DropdownMenu.Item>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
-				<span
-					class="mr-2 max-w-40 truncate rounded bg-[var(--video-editor-control)] px-2 py-0.5 text-xs"
-				>
-					{selectedItemIds.length > 1
-						? m.video_editor_items_selected({ count: selectedItemIds.length })
-						: selectedItem.label}
-				</span>
 				<Button
 					variant="ghost"
 					size="icon"
@@ -5018,6 +5060,7 @@
 							{m.video_editor_marker_label()}
 							<Input
 								class="h-7 w-44 rounded border border-[var(--video-editor-border)] bg-[var(--video-editor-field)] px-2 text-[var(--video-editor-field-text)] outline-none focus:border-[var(--video-editor-focus-border)]"
+								data-marker-label-input
 								value={markers.markerLabelDraft}
 								oninput={(event) => (markers.markerLabelDraft = event.currentTarget.value)}
 								onblur={() =>
@@ -5265,7 +5308,12 @@
 										onpointerdown={(event) => markers.startMarkerDrag(event, marker)}
 										ondblclick={(event) => {
 											event.stopPropagation();
-											markers.deleteTimelineMarker(marker.id);
+											markers.selectMarker(marker);
+											requestAnimationFrame(() => {
+												document
+													.querySelector<HTMLInputElement>('[data-marker-label-input]')
+													?.focus();
+											});
 										}}
 										onkeydown={(event) => markers.onMarkerKeydown(event, marker)}
 									>
@@ -6027,6 +6075,20 @@
 							{m.video_editor_create_compound()}
 						</ContextMenu.Item>
 					{/if}
+					{#if contextPrimaryItem && ['video', 'audio', 'image', 'composition'].includes(contextPrimaryItem.type)}
+						<ContextMenu.Item
+							disabled={!canTrimItemToPlayhead(contextPrimaryItem.id, 'start')}
+							onSelect={() => trimContextItemToPlayhead('start')}
+						>
+							{m.video_editor_trim_start_playhead()}
+						</ContextMenu.Item>
+						<ContextMenu.Item
+							disabled={!canTrimItemToPlayhead(contextPrimaryItem.id, 'end')}
+							onSelect={() => trimContextItemToPlayhead('end')}
+						>
+							{m.video_editor_trim_end_playhead()}
+						</ContextMenu.Item>
+					{/if}
 					{#if hasContextEditTools}
 						<ContextMenu.Sub>
 							<ContextMenu.SubTrigger>{m.video_editor_tools()}</ContextMenu.SubTrigger>
@@ -6063,6 +6125,7 @@
 													<ContextMenu.Shortcut>4 fps</ContextMenu.Shortcut>
 												</ContextMenu.Item>
 												<ContextMenu.Item
+													title={m.video_editor_scene_split_adaptive_help()}
 													onclick={() => onsplitscenes(contextPrimaryItem.id, 'adaptive-lfm')}
 												>
 													{m.video_editor_scene_split_adaptive()}
@@ -6195,6 +6258,9 @@
 							>
 						</ContextMenu.Item>
 					{/if}
+					<ContextMenu.Item disabled={!contextCrossfadeAvailable} onclick={onaddcrossfade}>
+						{m.video_editor_crossfade()}
+					</ContextMenu.Item>
 					{#if bentoEligibleIds.length >= 2}
 						<ContextMenu.Item onclick={() => (bentoLayoutOpen = true)}>
 							{m.video_editor_bento_open()}
@@ -6422,6 +6488,13 @@
 						<ContextMenu.Shortcut
 							>{formatShortcutBinding(keyboardShortcuts.bindings.PASTE)}</ContextMenu.Shortcut
 						>
+					</ContextMenu.Item>
+					<ContextMenu.Separator />
+					<ContextMenu.Item onclick={() => addNamedTrack('video')}>
+						{m.video_editor_track_add_video()}
+					</ContextMenu.Item>
+					<ContextMenu.Item onclick={() => addNamedTrack('audio')}>
+						{m.video_editor_track_add_audio()}
 					</ContextMenu.Item>
 				{/if}
 			</ContextMenu.Content>

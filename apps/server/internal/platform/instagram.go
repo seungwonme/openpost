@@ -50,6 +50,7 @@ type InstagramAdapter struct {
 	redirectURI    string
 	graphVersion   string
 	instagramLogin bool
+	configID       string
 }
 
 func NewInstagramAdapter(clientID, clientSecret, redirectURI string) *InstagramAdapter {
@@ -145,8 +146,16 @@ func (i *InstagramAdapter) GenerateAuthURL(state string) (string, map[string]str
 	params.Set(oauthParamClientID, i.clientID)
 	params.Set(oauthParamRedirectURI, i.redirectURI)
 	params.Set("response_type", oauthResponseType)
-	params.Set("scope", strings.Join(instagramScopes(), ","))
 	params.Set("state", state)
+	if i.configID != "" {
+		// Meta forces newer apps onto Facebook Login for Business
+		// configurations: the configuration's config_id replaces the
+		// scope list in the dialog, and auth_type has no meaning there.
+		// The code exchange stays the shared oauth/access_token endpoint.
+		params.Set("config_id", i.configID)
+		return facebookOAuthBaseURL + "/" + i.graphVersion + "/dialog/oauth?" + params.Encode(), nil
+	}
+	params.Set("scope", strings.Join(instagramScopes(), ","))
 	params.Set("auth_type", "rerequest")
 	return facebookOAuthBaseURL + "/" + i.graphVersion + "/dialog/oauth?" + params.Encode(), nil
 }
@@ -327,8 +336,24 @@ func (i *InstagramAdapter) Publish(ctx context.Context, accessToken, instagramUs
 	result, err := executePublishWrite(req, "publish_media", func() (string, error) {
 		return i.publish(ctx, accessToken, instagramUserID, req)
 	})
+	var outcome *instagramPublishOutcome
+	if errors.As(err, &outcome) {
+		return outcome.result, outcome.err
+	}
 	return result, normalizeMetaPublishError(err)
 }
+
+// instagramPublishOutcome carries a classified result out of publish paths
+// whose write function returns only a media id. A pending checkpoint recorded
+// before the provider call otherwise backfills the empty result on failure and
+// hides a definite rejection.
+type instagramPublishOutcome struct {
+	result PublishResult
+	err    error
+}
+
+func (e *instagramPublishOutcome) Error() string { return e.err.Error() }
+func (e *instagramPublishOutcome) Unwrap() error { return e.err }
 
 func (i *InstagramAdapter) publish(ctx context.Context, accessToken, instagramUserID string, req *PublishRequest) (string, error) {
 	if err := i.validateLoginSettings(req); err != nil {
@@ -359,7 +384,7 @@ func (i *InstagramAdapter) publish(ctx context.Context, accessToken, instagramUs
 	if err := checkpointInstagramFinalContainer(req, containerID); err != nil {
 		return "", err
 	}
-	if err := i.waitForContainer(ctx, accessToken, containerID); err != nil {
+	if err := i.waitForFinalContainer(ctx, accessToken, containerID); err != nil {
 		return "", err
 	}
 	if err := checkpointInstagramPublishIntent(req, containerID); err != nil {
@@ -417,7 +442,10 @@ func (i *InstagramAdapter) createMediaContainer(ctx context.Context, accessToken
 	if settingBool(req.Settings, "share_to_feed") && instagramIsReel(req) && !carouselItem {
 		values["share_to_feed"] = "true"
 	}
-	if altText != "" && !video {
+	if altText != "" && !video && !instagramIsStory(req) {
+		if err := providerlimits.ValidateInstagramAltText(altText); err != nil {
+			return "", err
+		}
 		values["alt_text"] = altText
 	}
 	if userTags := settingString(mediaSettings, "user_tags"); userTags != "" {
@@ -437,9 +465,14 @@ func (i *InstagramAdapter) createMediaContainer(ctx context.Context, accessToken
 
 	respBody, err := doMetaPropagationForm(ctx, i.graphURL(instagramUserID+"/media"), values, metaCodeKey{code: "9004", subcode: "2207052"})
 	if err != nil {
+		i.logRequestFailure("media_create", instagramUserID, err)
 		return "", fmt.Errorf("instagram media container: %w", err)
 	}
-	return instagramIDFromResponse("instagram media container", respBody)
+	id, err := instagramIDFromResponse("instagram media container", respBody)
+	if err != nil {
+		i.logRequestFailure("media_create", instagramUserID, err)
+	}
+	return id, err
 }
 
 func instagramMediaTags(raw, valueKey string, maximum int, coordinatesRequired bool) (string, error) {
@@ -506,7 +539,7 @@ func (i *InstagramAdapter) publishCarousel(ctx context.Context, accessToken, ins
 	if err := checkpointInstagramFinalContainer(req, containerID); err != nil {
 		return "", err
 	}
-	if err := i.waitForContainer(ctx, accessToken, containerID); err != nil {
+	if err := i.waitForFinalContainer(ctx, accessToken, containerID); err != nil {
 		return "", err
 	}
 	if err := checkpointInstagramPublishIntent(req, containerID); err != nil {
@@ -518,25 +551,28 @@ func (i *InstagramAdapter) publishCarousel(ctx context.Context, accessToken, ins
 func (i *InstagramAdapter) publishStories(ctx context.Context, accessToken, instagramUserID string, req *PublishRequest) (string, error) {
 	ids := make([]string, 0, len(req.PlatformMediaIDs))
 	for index, mediaURL := range req.PlatformMediaIDs {
-		if err := req.Checkpoint(pendingInstagramStoryCreateResult(index, ids)); err != nil {
+		pending := pendingInstagramStoryCreateResult(index, ids)
+		if err := req.Checkpoint(pending); err != nil {
 			return "", err
 		}
 		containerID, err := i.createMediaContainer(ctx, accessToken, instagramUserID, "", mediaURL, isVideoMime(req.Media[index].MimeType), false, req, mediaSettingsAt(req, index), mediaAltTextAt(req, index))
 		if err != nil {
-			return "", err
+			return "", instagramStoryFailure(pending, err)
 		}
-		if err := req.Checkpoint(pendingInstagramStoryResult(index, ids, containerID)); err != nil {
+		pending = pendingInstagramStoryResult(index, ids, containerID)
+		if err := req.Checkpoint(pending); err != nil {
 			return "", err
 		}
 		if err := i.waitForContainer(ctx, accessToken, containerID); err != nil {
-			return "", err
+			return "", instagramStoryFailure(pending, err)
 		}
-		if err := req.Checkpoint(pendingInstagramStoryPublishResult(index, ids, containerID)); err != nil {
+		pending = pendingInstagramStoryPublishResult(index, ids, containerID)
+		if err := req.Checkpoint(pending); err != nil {
 			return "", err
 		}
 		publishedID, err := i.publishMediaContainer(ctx, accessToken, instagramUserID, containerID, req, pendingInstagramStoryResult(index, ids, containerID))
 		if err != nil {
-			return "", err
+			return "", instagramStoryFailure(pendingInstagramStoryResult(index, ids, containerID), err)
 		}
 		ids = append(ids, publishedID)
 		if index+1 < len(req.PlatformMediaIDs) {
@@ -546,6 +582,17 @@ func (i *InstagramAdapter) publishStories(ctx context.Context, accessToken, inst
 		}
 	}
 	return strings.Join(ids, ","), nil
+}
+
+func instagramStoryFailure(pending PublishResult, err error) error {
+	if errors.Is(err, errInstagramContainerPublished) {
+		checkpoint, parseErr := parseInstagramPublishCheckpoint(pending.ProviderReference)
+		if parseErr == nil && checkpoint.kind == instagramCheckpointStoryKind {
+			pending = pendingInstagramStoryPublishResult(checkpoint.currentIndex, checkpoint.references, checkpoint.containerID)
+		}
+	}
+	result, normalized := instagramPendingOrRejected(pending, err)
+	return &instagramPublishOutcome{result: result, err: normalized}
 }
 
 func (i *InstagramAdapter) createCarouselContainer(ctx context.Context, accessToken, instagramUserID string, req *PublishRequest, childIDs []string) (string, error) {
@@ -726,6 +773,16 @@ func (i *InstagramAdapter) DeleteComment(ctx context.Context, accessToken, _ str
 	return nil
 }
 
+var errInstagramContainerPublished = errors.New("instagram container is already published")
+
+func (i *InstagramAdapter) waitForFinalContainer(ctx context.Context, accessToken, containerID string) error {
+	err := i.waitForContainer(ctx, accessToken, containerID)
+	if errors.Is(err, errInstagramContainerPublished) {
+		return &instagramPublishOutcome{result: pendingInstagramPublishResult(containerID), err: err}
+	}
+	return err
+}
+
 func (i *InstagramAdapter) waitForContainer(ctx context.Context, accessToken, containerID string) error {
 	const maxAttempts = 6
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -734,8 +791,10 @@ func (i *InstagramAdapter) waitForContainer(ctx context.Context, accessToken, co
 			return err
 		}
 		switch status {
-		case "FINISHED", "PUBLISHED":
+		case "FINISHED":
 			return nil
+		case "PUBLISHED":
+			return errInstagramContainerPublished
 		case "ERROR", "EXPIRED":
 			return classifyInstagramContainerFailure(detail)
 		}
@@ -751,6 +810,11 @@ func (i *InstagramAdapter) waitForContainer(ctx context.Context, accessToken, co
 }
 
 func (i *InstagramAdapter) containerStatus(ctx context.Context, accessToken, containerID string) (status, detail string, err error) {
+	defer func() {
+		if err != nil {
+			i.logRequestFailure("container_status", containerID, err)
+		}
+	}()
 	respBody, err := doMetaRequest(ctx, http.MethodGet, i.graphURL(containerID+"?fields=status_code,status&access_token="+url.QueryEscape(accessToken)), nil, nil)
 	if err != nil {
 		return "", "", fmt.Errorf("instagram container status: %w", err)
@@ -1061,7 +1125,11 @@ func (i *InstagramAdapter) resumeFinalContainer(ctx context.Context, accessToken
 		result.ProviderReference = pending.ProviderReference
 		return result, nil
 	case "PUBLISHED":
-		result := AcceptedPublishResult("")
+		// Meta published the container, but the media_publish response that
+		// carried the published media ID was lost. Recover the ID with an
+		// identity check over the account's recent published media so post
+		// links and analytics joins survive the ambiguous submission.
+		result := AcceptedPublishResult(i.recoverPublishedMediaID(ctx, accessToken, instagramUserID, req))
 		result.ProviderState = instagramPublishedProviderState
 		result.ProviderReference = pending.ProviderReference
 		return result, nil
@@ -1075,6 +1143,61 @@ func (i *InstagramAdapter) resumeFinalContainer(ctx context.Context, accessToken
 	default:
 		return pending, nil
 	}
+}
+
+// recoverPublishedMediaID resolves the published media ID after a resumed
+// final container reports PUBLISHED. The original media_publish response was
+// lost to an ambiguous failure, so the ID is recovered from the account's
+// recent published media with an identity check: the authored caption
+// derivation (the trimmed request content sent as the container caption) must
+// match exactly one recent item of the media type this request publishes.
+// Empty captions never attempt recovery, and an ambiguous or failed lookup
+// keeps the empty ID instead of failing a publish that succeeded.
+func (i *InstagramAdapter) recoverPublishedMediaID(ctx context.Context, accessToken, instagramUserID string, req *PublishRequest) string {
+	if req == nil || len(req.PlatformMediaIDs) == 0 {
+		return ""
+	}
+	caption := strings.TrimSpace(req.Content)
+	if caption == "" {
+		return ""
+	}
+	expectedType := "IMAGE"
+	if len(req.PlatformMediaIDs) > 1 {
+		expectedType = "CAROUSEL_ALBUM"
+	} else if len(req.Media) > 0 && isVideoMime(req.Media[0].MimeType) {
+		expectedType = "VIDEO"
+	}
+	query := url.Values{
+		"fields":              {"id,caption,media_type"},
+		"limit":               {"10"},
+		oauthParamAccessToken: {accessToken},
+	}
+	respBody, err := doMetaRequest(ctx, http.MethodGet, i.graphURL(instagramUserID+"/media")+"?"+query.Encode(), nil, nil)
+	if err != nil {
+		return ""
+	}
+	var response struct {
+		Data []struct {
+			ID        string `json:"id"`
+			Caption   string `json:"caption"`
+			MediaType string `json:"media_type"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return ""
+	}
+	match, matches := "", 0
+	for _, item := range response.Data {
+		if item.MediaType != expectedType || item.Caption != caption {
+			continue
+		}
+		matches++
+		match = item.ID
+	}
+	if matches != 1 || validateInstagramCheckpointID(match) != nil {
+		return ""
+	}
+	return match
 }
 
 func (i *InstagramAdapter) resumeCarousel(ctx context.Context, accessToken, instagramUserID string, req *PublishRequest, checkpoint instagramPublishCheckpoint) (PublishResult, error) {
@@ -1159,7 +1282,9 @@ func (i *InstagramAdapter) resumeStorySequence(ctx context.Context, accessToken,
 		if checkpoint.containerID != "" {
 			return rejectedInstagramCheckpoint(pending, "instagram story creation checkpoint contains a container")
 		}
-		return pending, nil
+		// The create request may have been lost before Meta answered, so no
+		// container id was recorded. Retrying container creation is safe:
+		// an unpublished duplicate never reaches the Story.
 	}
 	if checkpoint.containerID == "" {
 		index := checkpoint.currentIndex
@@ -1241,13 +1366,20 @@ func acceptedInstagramStoryResult(publishedIDs []string, providerReference strin
 }
 
 func instagramPendingOrRejected(pending PublishResult, err error) (PublishResult, error) {
+	var outcome *instagramPublishOutcome
+	if errors.As(err, &outcome) {
+		return outcome.result, outcome.err
+	}
 	err = normalizeMetaPublishError(err)
 	if instagramIsReadinessRejection(err) {
 		checkpoint, parseErr := parseInstagramPublishCheckpoint(pending.ProviderReference)
 		if parseErr == nil {
-			if checkpoint.kind == instagramCheckpointStoryPostKind {
+			switch checkpoint.kind {
+			case instagramCheckpointStoryPostKind:
 				pending = pendingInstagramStoryResult(checkpoint.currentIndex, checkpoint.references, checkpoint.containerID)
-			} else {
+			case instagramCheckpointStoryKind, instagramCheckpointStoryMakeKind:
+				pending = pendingInstagramStoryCheckpoint(checkpoint)
+			default:
 				pending = pendingInstagramFinalResult(checkpoint.containerID)
 			}
 		}
@@ -1278,6 +1410,18 @@ func (i *InstagramAdapter) publishMediaContainer(ctx context.Context, accessToke
 	}
 	if err != nil {
 		err = normalizeMetaPublishError(err)
+		i.logRequestFailure("media_publish", containerID, err)
+		if isMetaUnavailableTarget(err) {
+			pending := pendingInstagramPublishResult(containerID)
+			checkpoint, parseErr := parseInstagramPublishCheckpoint(retryCheckpoint.ProviderReference)
+			if parseErr == nil && checkpoint.kind == instagramCheckpointStoryKind {
+				pending = pendingInstagramStoryPublishResult(checkpoint.currentIndex, checkpoint.references, containerID)
+			}
+			if checkpointErr := req.Checkpoint(pending); checkpointErr != nil {
+				return "", checkpointErr
+			}
+			return "", &instagramPublishOutcome{result: pending, err: fmt.Errorf("instagram media publish: %w", err)}
+		}
 		if instagramIsReadinessRejection(err) {
 			if checkpointErr := req.Checkpoint(retryCheckpoint); checkpointErr != nil {
 				return "", checkpointErr
@@ -1286,6 +1430,11 @@ func (i *InstagramAdapter) publishMediaContainer(ctx context.Context, accessToke
 		return "", fmt.Errorf("instagram media publish: %w", err)
 	}
 	return instagramIDFromResponse("instagram media publish", respBody)
+}
+
+func isMetaUnavailableTarget(err error) bool {
+	var providerErr *HTTPError
+	return errors.As(err, &providerErr) && providerErr.Code == metaUnavailableTargetCode
 }
 
 func instagramIDFromResponse(label string, respBody []byte) (string, error) {

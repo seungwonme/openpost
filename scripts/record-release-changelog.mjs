@@ -4,7 +4,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { prepareReleaseChangelog, validateChangelog } from "../packages/changelog/src/index.js";
+import {
+  parseChangelog,
+  prepareReleaseChangelog,
+  validateChangelog,
+} from "../packages/changelog/src/index.js";
 import { publishedStableReleaseTag } from "./published-release-tag.mjs";
 import {
   changelogFragmentEntries,
@@ -35,6 +39,53 @@ function git(args) {
   } catch (error) {
     fail(`git ${args.join(" ")} failed (${String(error.message).split("\n")[0]})`);
   }
+}
+
+function extractUnreleasedBody(markdown) {
+  const marker = "## [Unreleased]";
+  const markerIndex = markdown.indexOf(marker);
+  if (markerIndex < 0) return "";
+  const bodyStart = markerIndex + marker.length;
+  const nextOffset = markdown.slice(bodyStart).search(/\n## \[/u);
+  return markdown
+    .slice(bodyStart, nextOffset < 0 ? markdown.length : bodyStart + nextOffset)
+    .trim();
+}
+
+function unreleasedItemCounts(body) {
+  const section = parseChangelog(`## [Unreleased]\n\n${body}\n`)[0];
+  const counts = new Map();
+  for (const group of section?.groups ?? []) {
+    for (const item of group.items) {
+      const key = `${group.title}\u0000${item}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+// Keep only Unreleased items added after the tag. Items already present at
+// the tag were shipped by this release, so leaving them behind would repeat
+// them in every later release note.
+function keepPostTagUnreleased(currentBody, tagBody) {
+  const shipped = unreleasedItemCounts(tagBody);
+  const section = parseChangelog(`## [Unreleased]\n\n${currentBody}\n`)[0];
+  const lines = [];
+  for (const group of section?.groups ?? []) {
+    const remaining = [];
+    for (const item of group.items) {
+      const key = `${group.title}\u0000${item}`;
+      const count = shipped.get(key) ?? 0;
+      if (count > 0) {
+        shipped.set(key, count - 1);
+        continue;
+      }
+      remaining.push(item);
+    }
+    if (remaining.length === 0) continue;
+    lines.push(`### ${group.title}`, "", ...remaining.map((item) => `- ${item}`), "");
+  }
+  return lines.join("\n").trim();
 }
 
 // The tag pins exactly which fragments belong to this release. Fragments
@@ -104,11 +155,58 @@ const body = preparedLines
   .trim();
 if (!body) fail(`prepared changelog section [${normalized}] has no entries`);
 
+// Direct edits live in CHANGELOG rather than fragment files. Consume only
+// the exact notes captured by the tag, retaining additions made on main later.
+function consumeTaggedDirectNotes(markdown, taggedMarkdown) {
+  const tagged = parseChangelog(taggedMarkdown).find((section) => section.label === "Unreleased");
+  const pending = parseChangelog(markdown).find((section) => section.label === "Unreleased");
+  if (!tagged || !pending) return markdown;
+  const counts = new Map();
+  for (const group of tagged.groups) {
+    const items = counts.get(group.title) ?? new Map();
+    for (const item of group.items) items.set(item, (items.get(item) ?? 0) + 1);
+    counts.set(group.title, items);
+  }
+  const introCounts = new Map();
+  for (const line of tagged.intro) introCounts.set(line, (introCounts.get(line) ?? 0) + 1);
+  let consumed = 0;
+  const keep = (item, items) => {
+    const count = items?.get(item) ?? 0;
+    if (!count) return true;
+    items.set(item, count - 1);
+    consumed += 1;
+    return false;
+  };
+  const intro = pending.intro.filter((line) => keep(line, introCounts));
+  const groups = pending.groups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => keep(item, counts.get(group.title))),
+    }))
+    .filter((group) => group.items.length > 0);
+  if (!consumed) return markdown;
+  const remaining = [
+    intro.join("\n"),
+    ...groups.map(
+      (group) => `### ${group.title}\n\n${group.items.map((item) => `- ${item}`).join("\n")}`,
+    ),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const marker = "## [Unreleased]";
+  const bodyStart = markdown.indexOf(marker) + marker.length;
+  const next = markdown.slice(bodyStart).search(/\n## \[/u);
+  const bodyEnd = next < 0 ? markdown.length : bodyStart + next;
+  return `${markdown.slice(0, bodyStart)}\n\n${remaining ? `${remaining}\n\n` : ""}${markdown.slice(bodyEnd).replace(/^\n+/u, "")}`;
+}
+
 const changelogPath = resolve("CHANGELOG.md");
-const current = readFileSync(changelogPath, "utf8");
+const original = readFileSync(changelogPath, "utf8");
+const current = consumeTaggedDirectNotes(original, tagChangelog);
 if (new RegExp(`^## \\[${normalized}\\](?: - .+)?$`, "mu").test(current)) {
-  // Idempotent reruns (for example after a rebase) keep the recorded
-  // section and sweep any consumed fragments left behind.
+  // Idempotent reruns keep the dated section, repair pending direct notes
+  // left by older recorders, and sweep consumed fragments left behind.
+  if (current !== original) writeFileSync(changelogPath, current);
   let swept = 0;
   for (const entry of tagTree) {
     const file = resolve("changes", entry);
@@ -128,10 +226,14 @@ const bodyStart = markerIndex + marker.length;
 const nextOffset = current.slice(bodyStart).search(/\n## \[/u);
 const insertAt = nextOffset < 0 ? current.length : bodyStart + nextOffset;
 const unreleasedBody = current.slice(bodyStart, insertAt).trim();
+const postTagUnreleased = keepPostTagUnreleased(
+  unreleasedBody,
+  extractUnreleasedBody(tagChangelog),
+);
 const rest = current.slice(insertAt).replace(/^\n+/u, "").trimEnd();
 
 let result = `${current.slice(0, bodyStart)}\n\n`;
-if (unreleasedBody) result += `${unreleasedBody}\n\n`;
+if (postTagUnreleased) result += `${postTagUnreleased}\n\n`;
 result += `## [${normalized}] - ${recordDate}\n\n${body}\n`;
 if (rest) result += `\n${rest}\n`;
 
