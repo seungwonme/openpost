@@ -213,7 +213,7 @@ func TestMetaFailureMessagesAreCurated(t *testing.T) {
 		"meta:checkpoint:190:459":                "security check",
 		"meta:checkpoint:instagram":              "instagram.com",
 		"meta:missing_page_role:190:492":         "role on this Page",
-		"meta:nonexistent:100:33":                "no longer exists",
+		"meta:nonexistent:100:33":                "cannot access",
 		"meta:media_silent_audio:2207082":        "volume to 0",
 		"meta:media_format:2207085":              "format, duration",
 		"meta:media_rejected:2207042":            "25 posts per day",
@@ -319,5 +319,37 @@ func TestInstagramResumePublishRejectsFailedContainerWithCuratedCode(t *testing.
 	var providerErr *HTTPError
 	if !errors.As(err, &providerErr) || providerErr.Code != "meta:media_silent_audio:2207082" {
 		t.Fatalf("expected the shared classifier code, got %v", err)
+	}
+}
+
+func TestInstagramResumePublishedIDRecoverySwallowsRecentMediaFailure(t *testing.T) {
+	t.Setenv("META_GRAPH_API_VERSION", "v25.0")
+	originalClient := httpClient
+	defer func() { httpClient = originalClient }()
+
+	httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/v25.0/container-1":
+			return jsonResponse(req, `{"status_code":"PUBLISHED"}`), nil
+		case "/v25.0/ig-1/media":
+			resp := jsonResponse(req, `{"error":{"message":"permissions went away","type":"OAuthException","code":200}}`)
+			resp.StatusCode = http.StatusBadRequest
+			return resp, nil
+		default:
+			t.Fatalf("unexpected request %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})}
+
+	result, err := NewInstagramAdapter("", "", "").ResumePublish(t.Context(), "page-token", "ig-1", &PublishRequest{
+		Content:          "Launch image",
+		PlatformMediaIDs: []string{"https://media.example/image.jpg"},
+		Media:            []MediaItem{{ID: "media-1", MimeType: "image/jpeg"}},
+	}, "ig1:container-1")
+	if err != nil {
+		t.Fatalf("a failed recovery lookup must not fail the accepted publish: %v", err)
+	}
+	if result.SubmissionState != PublishSubmissionAccepted || result.ExternalID != "" {
+		t.Fatalf("failed recovery must keep the empty ID: %#v", result)
 	}
 }

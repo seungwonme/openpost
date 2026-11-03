@@ -23,7 +23,7 @@
 
 <section class="landing-hero marketing-shell" aria-labelledby="hero-title">
 	<div class="hero-intro">
-		<h1 id="hero-title">
+		<h1 id="hero-title" class="marketing-title">
 			You build the business.<br /><span>We’ll help you <HeroAccent>share it.</HeroAccent></span>
 		</h1>
 		<p>
@@ -47,7 +47,9 @@
 				<a
 					href={`/platforms/${platform.slug}`}
 					aria-label={`${platform.name} publishing guide`}
-					class="focus-ring"><PostizSocialLogo platform={platform.slug} /></a
+					class="focus-ring"
+					class:youtube-text={platform.slug === 'youtube'}
+					><PostizSocialLogo platform={platform.slug} /></a
 				>
 			{/each}
 		</div>
@@ -65,24 +67,24 @@
 
 <CreatorStories />
 
-<section class="faq-section marketing-shell" aria-labelledby="faq-title">
+<section class="faq-section marketing-shell section-pad" aria-labelledby="faq-title">
 	<div>
-		<h2 id="faq-title">A few questions.</h2>
+		<h2 id="faq-title" class="section-heading">A few questions.</h2>
 		<a href="/faq" class="focus-ring text-link">Read the FAQ <ArrowUpRight size={17} /></a>
 	</div>
 	<div class="faq-list">
 		{#each shortFaqs as item (item.question)}
 			<details>
-				<summary>{item.question}<span aria-hidden="true">+</span></summary>
+				<summary class="focus-ring">{item.question}<span aria-hidden="true">+</span></summary>
 				<p>{item.answer}</p>
 			</details>
 		{/each}
 	</div>
 </section>
 
-<section class="landing-close" aria-labelledby="closing-title">
+<section class="landing-close section-pad" aria-labelledby="closing-title">
 	<div class="marketing-shell">
-		<h2 id="closing-title">Make your next post<br />with OpenPost.</h2>
+		<h2 id="closing-title" class="section-heading">Make your next post<br />with OpenPost.</h2>
 		<Button href={managedSignupUrl} size="lg" class="landing-cta"
 			>Start your free trial <ArrowRight data-icon="inline-end" /></Button
 		>
@@ -99,11 +101,8 @@
 		text-align: center;
 		margin-bottom: 40px;
 	}
-	h1 {
-		font-size: clamp(40px, 5.7vw, 78px);
-		font-weight: 550;
-		letter-spacing: -0.04em;
-		line-height: 1.06;
+	.hero-intro h1 {
+		max-width: none;
 	}
 	h1 span {
 		color: var(--marketing-soft-ink);
@@ -129,7 +128,7 @@
 	}
 	.trial-note {
 		margin-top: 12px;
-		font-size: 12px;
+		font-size: 13px;
 		color: var(--muted-foreground);
 	}
 	.text-link {
@@ -169,22 +168,18 @@
 		height: 44px;
 		border-radius: 6px;
 	}
+	.platform-marks a.youtube-text {
+		width: auto;
+		padding-inline: 8px;
+	}
 	.platform-marks :global(img) {
 		width: 27px;
 		height: 27px;
-	}
-	h2 {
-		font-size: clamp(32px, 3.5vw, 48px);
-		font-weight: 550;
-		line-height: 1.12;
-		letter-spacing: -0.035em;
-		text-wrap: balance;
 	}
 	.faq-section {
 		display: grid;
 		grid-template-columns: 0.8fr 1.2fr;
 		gap: 64px;
-		padding-block: 80px;
 	}
 	.faq-section .text-link {
 		margin-top: 16px;
@@ -207,11 +202,6 @@
 	.faq-list summary::-webkit-details-marker {
 		display: none;
 	}
-	.faq-list summary:focus-visible {
-		outline: 2px solid var(--ring);
-		outline-offset: 4px;
-		border-radius: 4px;
-	}
 	.faq-list summary span {
 		font-size: 22px;
 		font-weight: 400;
@@ -227,7 +217,6 @@
 	}
 	.landing-close {
 		text-align: center;
-		padding-block: 72px;
 		background: var(--marketing-section);
 	}
 	.landing-close :global(.landing-cta) {
@@ -242,9 +231,6 @@
 		}
 		.hero-intro {
 			margin-bottom: 28px;
-		}
-		h1 {
-			font-size: clamp(34px, 7vw, 53px);
 		}
 		.hero-intro > p {
 			font-size: 16px;
@@ -261,10 +247,6 @@
 		.platform-marks {
 			justify-content: center;
 			gap: 8px;
-		}
-		.faq-section,
-		.landing-close {
-			padding-block: 48px;
 		}
 		.faq-section {
 			grid-template-columns: minmax(0, 1fr);

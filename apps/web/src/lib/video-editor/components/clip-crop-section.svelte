@@ -26,7 +26,7 @@
 	import type { TimelineSnapshot } from '$lib/video-editor/timeline/commands/types';
 	import { autoKeyframeStore } from '$lib/video-editor/timeline/stores/auto-keyframe-store.svelte';
 	import { timelineStore } from '$lib/video-editor/timeline/stores/timeline-store.svelte';
-	import ScrubbableNumberInput from '$lib/components/editor-scrubbable-number-input.svelte';
+	import { ScrubField } from '$lib/components/editor-density';
 
 	let {
 		itemId,
@@ -178,10 +178,7 @@
 </script>
 
 {#if items.length > 0}
-	<section
-		class="overflow-hidden rounded-md border border-[var(--video-editor-border)] bg-[var(--video-editor-panel)]"
-		data-testid="clip-crop-section"
-	>
+	<section class="border-t border-[var(--video-editor-border)]" data-testid="clip-crop-section">
 		<EditorDisclosure
 			label={m.video_editor_crop()}
 			summary={items.some(
@@ -190,7 +187,7 @@
 						Object.values(item.crop).some((value) => typeof value === 'number' && value !== 0)) ||
 					controls.some((control) => item.keyframes?.[control.property]?.frames.length)
 			)
-				? m.video_editor_workspace_active()
+				? m.video_editor_modified()
 				: undefined}
 		>
 			<div class="divide-y divide-[var(--video-editor-border)]">
@@ -203,7 +200,7 @@
 						>
 						<div class="flex min-w-0 items-center gap-1">
 							<Slider
-								class="h-[22px] min-w-8 flex-1 [&_[data-slot=slider-thumb]]:shadow-none"
+								class="h-[var(--editor-22,22px)] min-w-8 flex-1 [&_[data-slot=slider-thumb]]:shadow-none"
 								min={control.axis === 'softness' ? -maximum : 0}
 								max={maximum}
 								step={1}
@@ -222,19 +219,20 @@
 									class="pointer-events-none absolute top-1/2 left-1.5 -translate-y-1/2 text-[9px] font-semibold text-[var(--video-editor-muted)]"
 									>{control.shortLabel}</span
 								>
-								<ScrubbableNumberInput
+								<ScrubField
 									ariaLabel={control.label()}
 									{value}
 									placeholder={m.video_editor_property_mixed()}
 									min={control.axis === 'softness' ? -maximum : 0}
 									max={maximum}
 									step={1}
-									decimals={0}
-									class="h-[22px] w-full rounded border border-[var(--video-editor-border)] bg-[var(--video-editor-control)] py-1 pr-5 pl-4 text-right text-[11px] tabular-nums outline-none"
+									precision={0}
+									valueWidth="100%"
+									class="h-[var(--editor-22,22px)] rounded border border-[var(--video-editor-border)] bg-[var(--video-editor-control)] py-1 pr-5 pl-4 text-right text-[11px] tabular-nums outline-none"
 									onbegin={beginGesture}
-									onlive={(next) => writeLive(control.property, next)}
-									oncommit={(next) => commitGesture(control.property, next)}
-									oncancel={cancelGesture}
+									onValueChange={(next) => writeLive(control.property, next)}
+									onValueCommit={(next) => commitGesture(control.property, next)}
+									onValueCancel={cancelGesture}
 								/>
 								<span
 									class="pointer-events-none absolute top-1/2 right-1.5 -translate-y-1/2 text-[9px] text-[var(--video-editor-muted)]"

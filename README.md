@@ -70,14 +70,14 @@
   <a href="https://openpo.st/#features">See all features</a>
 </p>
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./assets/screenshots/mobile-gallery-dark.png">
-    <img src="./assets/screenshots/mobile-gallery-light.png" alt="OpenPost on iOS: Drafts, Inbox, Ideate, Calendar, and Analytics, each shown in a labelled phone mockup" width="100%">
-  </picture>
-</p>
-
 ## What you can do
+
+Home shows upcoming posts and the replies, failures, and connections that need your attention.
+Use Posts to switch between the list and calendar, and Studio to open the image editor,
+video editor, Quick Cut, or Recorder. Choose New post in your profile's Preferences
+to open the app on the composer instead.
+
+Demos and linked screenshots use sample data.
 
 - <img src="./assets/brand/features/accounts.svg" alt="" width="24" height="24" align="top"> **[Connect accounts](https://openpo.st/docs/guides/accounts).** Manage your social connections in one workspace. Each provider keeps its own capabilities and publishing limits.
 - <img src="./assets/brand/features/compose.svg" alt="" width="24" height="24" align="top"> **[Compose for each platform](https://openpo.st/docs/guides/publishing).** Write posts and threads, then adjust the text and media for each account. Preview each version before publishing. Save account groups as Social Sets to reuse them.
@@ -152,22 +152,22 @@ Run OpenPost with Docker Compose. The default setup uses one container with SQLi
 ## Supported platforms
 
 <p>
-  <img src="./assets/postiz-socials/Instagram.svg" alt="Instagram" width="32" height="32">
-  <img src="./assets/postiz-socials/Facebook.svg" alt="Facebook" width="32" height="32">
-  <img src="./assets/postiz-socials/Linkedin.svg" alt="LinkedIn" width="32" height="32">
-  <img src="./assets/postiz-socials/X.svg" alt="X" width="32" height="32">
-  <img src="./assets/postiz-socials/TikTok.svg" alt="TikTok" width="32" height="32">
-  <img src="./assets/postiz-socials/Youtube.svg" alt="YouTube" width="32" height="32">
-  <img src="./assets/postiz-socials/Threads.svg" alt="Threads" width="32" height="32">
-  <img src="./assets/postiz-socials/Bluesky.svg" alt="Bluesky" width="32" height="32">
-  <img src="./assets/postiz-socials/Mastodon.svg" alt="Mastodon" width="32" height="32">
-  <img src="./assets/postiz-socials/Pixelfed.svg" alt="Pixelfed" width="32" height="32">
-  <img src="./assets/postiz-socials/Peertube.svg" alt="PeerTube" width="32" height="32">
-  <img src="./assets/postiz-socials/Lemmy.svg" alt="Lemmy" width="32" height="32">
-  <img src="./assets/postiz-socials/PieFed.svg" alt="PieFed" width="32" height="32">
-  <img src="./assets/postiz-socials/Discord.svg" alt="Discord" width="32" height="32">
-  <img src="./assets/postiz-socials/Pinterest.svg" alt="Pinterest" width="32" height="32">
-  <img src="./assets/postiz-socials/Telegram.svg" alt="Telegram" width="32" height="32">
+  <img src="./assets/postiz-socials/Instagram.svg" alt="Instagram" width="32" height="32" align="middle">
+  <img src="./assets/postiz-socials/Facebook.svg" alt="Facebook" width="32" height="32" align="middle">
+  <img src="./assets/postiz-socials/Linkedin.svg" alt="LinkedIn" width="32" height="32" align="middle">
+  <img src="./assets/postiz-socials/X.svg" alt="X" width="32" height="32" align="middle">
+  <img src="./assets/postiz-socials/TikTok.svg" alt="TikTok" width="32" height="32" align="middle">
+  <a href="https://www.youtube.com/"><img src="./assets/logos/youtube.svg" alt="YouTube" width="56" height="48" align="middle"></a>
+  <img src="./assets/postiz-socials/Threads.svg" alt="Threads" width="32" height="32" align="middle">
+  <img src="./assets/postiz-socials/Bluesky.svg" alt="Bluesky" width="32" height="32" align="middle">
+  <img src="./assets/postiz-socials/Mastodon.svg" alt="Mastodon" width="32" height="32" align="middle">
+  <img src="./assets/postiz-socials/Pixelfed.svg" alt="Pixelfed" width="32" height="32" align="middle">
+  <img src="./assets/postiz-socials/Peertube.svg" alt="PeerTube" width="32" height="32" align="middle">
+  <img src="./assets/postiz-socials/Lemmy.svg" alt="Lemmy" width="32" height="32" align="middle">
+  <img src="./assets/postiz-socials/PieFed.svg" alt="PieFed" width="32" height="32" align="middle">
+  <img src="./assets/postiz-socials/Discord.svg" alt="Discord" width="32" height="32" align="middle">
+  <img src="./assets/postiz-socials/Pinterest.svg" alt="Pinterest" width="32" height="32" align="middle">
+  <img src="./assets/postiz-socials/Telegram.svg" alt="Telegram" width="32" height="32" align="middle">
 </p>
 
 OpenPost has integrations for Instagram, Facebook, LinkedIn, X, TikTok, YouTube, Threads, Bluesky, Mastodon, Pixelfed, PeerTube, Lemmy, PieFed, Discord, Pinterest, and Telegram. Mastodon and Pixelfed connect per instance over OAuth; PeerTube, Lemmy, and PieFed connect with instance credentials. Discord supports incoming webhooks and a bot integration; Telegram uses a bot.

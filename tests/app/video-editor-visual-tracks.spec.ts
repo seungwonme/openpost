@@ -24,16 +24,22 @@ test("a background moves between visual tracks with undo, cancel and persistence
   await page.getByRole("button", { name: "Open Video Editor", exact: true }).click();
   await page
     .getByRole("navigation", { name: "Assets", exact: true })
-    .getByRole("button", { name: "More", exact: true })
+    .getByRole("tab", { name: "Elements", exact: true })
     .click();
-  await page.getByRole("menuitem", { name: "Backgrounds", exact: true }).click();
+  await page
+    .getByRole("tablist", { name: "Elements", exact: true })
+    .getByRole("tab", { name: "Backgrounds", exact: true })
+    .click();
   await page.getByRole("searchbox", { name: "Search backgrounds" }).fill("Sunset mesh");
   await page.getByRole("button", { name: "Sunset mesh", exact: true }).click();
   const source = page.locator('[data-track="track-video-main"]');
   const destination = page.locator('[data-track="track-video-overlay"]');
   const clip = page.locator("[data-timeline-item-id]");
   await expect(source.locator("[data-timeline-item-id]")).toHaveCount(1);
-  await page.getByRole("tab", { name: "Backgrounds", exact: true }).focus();
+  await page
+    .getByRole("tablist", { name: "Elements", exact: true })
+    .getByRole("tab", { name: "Backgrounds", exact: true })
+    .focus();
   await page.keyboard.press("ControlOrMeta+z");
   await expect(clip).toHaveCount(0);
   await page.keyboard.press("ControlOrMeta+Shift+z");
@@ -72,12 +78,15 @@ test("a background moves between visual tracks with undo, cancel and persistence
     timeout: 30_000,
   });
   await expect(destination.locator("[data-timeline-item-id]")).toHaveCount(1);
-  await page
-    .getByRole("navigation", { name: "Assets", exact: true })
-    .getByRole("button", { name: "More", exact: true })
-    .click();
-  await page.getByRole("menuitem", { name: "Backgrounds", exact: true }).click();
-  await page.getByRole("searchbox", { name: "Search backgrounds" }).fill("Ocean mesh");
+  const backgroundsSearch = page.getByRole("searchbox", { name: "Search backgrounds" });
+  if (!(await backgroundsSearch.isVisible())) {
+    await page
+      .getByRole("navigation", { name: "Assets", exact: true })
+      .getByRole("tab", { name: "Backgrounds", exact: true })
+      .click();
+  }
+  await expect(backgroundsSearch).toBeVisible();
+  await backgroundsSearch.fill("Ocean mesh");
   await page.getByRole("button", { name: "Ocean mesh", exact: true }).click();
   const sunset = page.getByRole("button", { name: /^Sunset mesh\. Drag/ });
   const ocean = page.getByRole("button", { name: /^Ocean mesh\. Drag/ });
@@ -97,7 +106,7 @@ test("a background moves between visual tracks with undo, cancel and persistence
     await expect(
       page
         .getByRole("navigation", { name: "Editor panels" })
-        .getByRole("button", { name: "Edit", exact: true }),
+        .getByRole("button", { name: "Properties", exact: true }),
     ).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("textbox", { name: "Width", exact: true }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath(`inspector-light-${width}.png`) });
