@@ -242,3 +242,5 @@ README demos use `bun run capture:product-demos`, the `tests/app/product-demos.s
 The launch film lives in `apps/marketing/launch-film/`. `film.js` owns picture timing and sound cues on the music's bar grid. Rebuild app scenes as individually animated UI elements close to the app; keep workflow branches and camera movement authored in the film. `bun run render:launch-film` renders and mixes it from the licensed recordings in `sounds.json`. Measure soundtrack changes with earshot `critique` before keeping them, and publish the music credit with the film; see that README.
 
 README badges are generated into `assets/badges/` by `scripts/generate-readme-badges.mjs` from public GitHub counts and the main CI run. Keep light and dark variants together. The `README assets` workflow refreshes badges and star history together once every two days in a single commit; failed data reads leave the previous assets intact.
+
+This is a fork: read `FORK.md` for fork-only rules (migration numbering, upstream sync, Mac mini deployment).

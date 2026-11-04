@@ -58,6 +58,7 @@ import (
 	"github.com/openpost/backend/internal/services/repurpose"
 	"github.com/openpost/backend/internal/services/sessions"
 	telegramservice "github.com/openpost/backend/internal/services/telegram"
+	"github.com/openpost/backend/internal/services/trackedlinks"
 	"github.com/openpost/backend/internal/services/updatestatus"
 	"github.com/openpost/backend/internal/services/waitlist"
 	"github.com/openpost/backend/internal/services/workflows"
@@ -137,6 +138,7 @@ type RouteDeps struct {
 	NotificationService          *notifications.Service
 	OrganizationOwnershipService *organizationownership.Service
 	UpdateStatusService          *updatestatus.Service
+	TrackedLinkService           *trackedlinks.Service
 	GitHubStarsService           *githubstars.Service
 	ProviderReadinessService     *providerreadiness.Service
 	ConnectorRegistry            *connectors.Registry
@@ -325,6 +327,9 @@ func RegisterHumaRoutes(api huma.API, deps RouteDeps) {
 	publicationHandler.SetTelemetry(deps.Telemetry)
 	publicationHandler.SetNotificationService(deps.NotificationService)
 	publicationHandler.RegisterRoutes(api)
+	if deps.TrackedLinkService != nil {
+		handlers.NewTrackedLinkHandler(deps.TrackedLinkService, deps.DB, deps.Authenticator).RegisterRoutes(api)
+	}
 	publicationBuildHandler := handlers.NewPublicationBuildHandler(deps.DB, deps.Authenticator, deps.PublicationBuilder)
 	publicationBuildHandler.SetPublicationApplication(publicationHandler.BuilderApplication())
 	publicationBuildHandler.SetCapabilityResolver(capabilityResolverHandler)

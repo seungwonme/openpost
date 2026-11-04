@@ -227,6 +227,8 @@ func CreateSchema(db *bun.DB) error {
 		(*models.PublicationSegment)(nil),
 		(*models.PublicationSegmentMedia)(nil),
 		(*models.Rendition)(nil),
+		(*models.TrackedLink)(nil),
+		(*models.TrackedLinkClick)(nil),
 		(*models.RenditionSegment)(nil),
 		(*models.RenditionSegmentMedia)(nil),
 		(*models.RenditionMedia)(nil),

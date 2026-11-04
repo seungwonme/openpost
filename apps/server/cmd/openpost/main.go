@@ -93,6 +93,7 @@ import (
 	"github.com/openpost/backend/internal/services/sourcecontext"
 	telegramservice "github.com/openpost/backend/internal/services/telegram"
 	"github.com/openpost/backend/internal/services/tokenmanager"
+	"github.com/openpost/backend/internal/services/trackedlinks"
 	"github.com/openpost/backend/internal/services/updatestatus"
 	"github.com/openpost/backend/internal/services/usage"
 	"github.com/openpost/backend/internal/services/videoprocessing"
@@ -691,6 +692,8 @@ func main() {
 	mediaHandler.SetPublicMediaVerifier(publicMediaVerifier)
 	mediaHandler.SetVideoProcessor(videoProcessingService)
 	profileHandler := handlers.NewProfileHandler(db, authenticator, storage)
+	trackedLinkService := trackedlinks.NewService(db)
+	trackedLinkHandler := handlers.NewTrackedLinkHandler(trackedLinkService, db, authenticator)
 
 	var imageGenerator ai.Generator
 	var decisionGenerator ai.Decider
@@ -948,6 +951,7 @@ func main() {
 	})
 
 	handlers.NewPublicDiscoveryHandler(cfg.PublicURL, version).RegisterRoutes(e)
+	trackedLinkHandler.RegisterPublicRoutes(e)
 
 	mcpHandler := handlers.NewMCPHandler(db, authenticator, entitlementService)
 	configureMCPToolMode(mcpHandler, cfg)
@@ -1089,6 +1093,7 @@ func main() {
 		NotificationService:          notificationService,
 		OrganizationOwnershipService: organizationOwnershipService,
 		UpdateStatusService:          updateStatusService,
+		TrackedLinkService:           trackedLinkService,
 		GitHubStarsService:           githubStarsService,
 		AppVersion:                   version,
 		AppRevision:                  runningBuildRevision(),
