@@ -2,6 +2,7 @@ package trackedlinks
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -86,4 +87,12 @@ func TestResolveMissingAndInactive(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = svc.ResolveAndRecord(context.Background(), link.Slug, http.MethodGet, "", "", time.Now())
 	require.ErrorIs(t, err, ErrInactive)
+}
+
+func TestIsUniqueViolationOnlyMatchesSlugCollisions(t *testing.T) {
+	require.False(t, isUniqueViolation(nil))
+	require.True(t, isUniqueViolation(errors.New("UNIQUE constraint failed: tracked_links.slug")))
+	require.True(t, isUniqueViolation(errors.New(`ERROR: duplicate key value violates unique constraint "tracked_links_slug_key" (SQLSTATE 23505)`)))
+	require.False(t, isUniqueViolation(errors.New("FOREIGN KEY constraint failed")))
+	require.False(t, isUniqueViolation(errors.New("NOT NULL constraint failed: tracked_links.destination_url")))
 }

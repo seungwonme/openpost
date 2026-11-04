@@ -163,7 +163,14 @@ func obviousBotOrPrefetch(userAgent, purpose string) bool {
 	return false
 }
 
+// isUniqueViolation reports only slug collisions worth retrying. Other
+// constraint failures, such as a missing foreign key, must surface unchanged.
 func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "unique") || strings.Contains(message, "constraint")
+	return strings.Contains(message, "unique constraint") ||
+		strings.Contains(message, "duplicate key") ||
+		strings.Contains(message, "sqlstate 23505")
 }
