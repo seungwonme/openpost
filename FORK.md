@@ -24,11 +24,31 @@ missing version in ascending order, so gaps are allowed and upstream migrations 
 A database that has applied a fork migration should not be started with an upstream image. Restore
 the backup taken before the fork deployment instead.
 
+## Deploy to the Mac mini
+
+Production runs on the Mac mini at `https://openpost.aidenahn.com`. The MacBook does not run the
+app. Merge a change into `main`, then build and run it on the Mac mini:
+
+```sh
+ssh macmini '<checkout>/scripts/fork/macmini-deploy.sh --build'
+rsync -a macmini:Backups/openpost/<timestamp>/ ~/Backups/openpost/<timestamp>/
+```
+
+Every deploy backs up the data volume, `.env`, and both Compose files to
+`~/Backups/openpost/<timestamp>/` on the Mac mini, then restores that archive into a scratch volume
+and checks the database before the new image starts. Roll back with `--restore <backup-dir>`, which
+restores the data and the image it recorded. Do not schedule the script with launchd or cron. The
+runbook is `apps/docs/content/docs/self-hosting/macbook-macmini.mdx`.
+
+The overlay pins the Compose project name `openpost` and the external volume `openpost_openpost_data`, so the
+checkout can move or be renamed without starting on an empty volume.
+
 ## Fork-only paths
 
 | Path | Purpose |
 | --- | --- |
 | `FORK.md` | This file |
 | `docker-compose.macmini.yml` | Mac mini production overlay |
+| `scripts/fork/` | Mac mini deployment, backup, and restore |
 | `apps/docs/content/docs/self-hosting/macbook-macmini.mdx` | Mac mini runbook |
 | `apps/server/internal/services/trackedlinks/` | Tracked redirect links (`/go/:slug`) |

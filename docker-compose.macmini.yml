@@ -1,6 +1,12 @@
+# Mac mini production overlay. Deploy with scripts/fork/macmini-deploy.sh (see FORK.md).
+# The project and volume names are pinned so that moving or renaming this checkout keeps
+# the same container and data. The script records the image in .env as DEPLOY_IMAGE and
+# sets COMPOSE_FILE there, so a plain `docker compose` in this directory uses both files.
+name: openpost
+
 services:
   openpost:
-    image: ghcr.io/getopenpost/openpost:v7.35.1
+    image: ${DEPLOY_IMAGE:?Set DEPLOY_IMAGE in .env; run scripts/fork/macmini-deploy.sh --status}
     ports: !override
       - "127.0.0.1:18081:8080"
     volumes:
@@ -9,7 +15,11 @@ services:
       - aiden-edge
 
 volumes:
+  # Created outside Compose. External means Compose never creates an empty replacement
+  # and `docker compose down -v` cannot remove it.
   openpost_data:
+    external: true
+    name: openpost_openpost_data
 
 networks:
   aiden-edge:

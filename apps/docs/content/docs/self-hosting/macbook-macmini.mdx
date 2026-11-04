@@ -119,34 +119,41 @@ accounts there. This is the safer default for a new installation.
 
 ## Build and deliver a code change
 
-Keep source changes in Git and deliver an immutable image to the Mac mini:
+Merge source changes into `main` first. The Mac mini then builds that exact
+commit itself and runs it; nothing is run on the MacBook and no registry is
+involved. `scripts/fork/macmini-deploy.sh` does every step and refuses commits
+that are not on `origin/main`:
 
 ```sh
-git fetch origin main
-git checkout <reviewed-commit>
-docker buildx build \
-  --platform linux/arm64 \
-  --tag ghcr.io/<owner>/openpost:<tag> \
-  --push .
+ssh macmini '/Users/aiden/Dev/2-area/nomadamas/12-playground/openpost/scripts/fork/macmini-deploy.sh --build'
 ```
 
-The exact build and registry command depends on the fork's release workflow.
-The important properties are an immutable tag, an exact source commit, and a
-recorded image digest. Do not build on the Mac mini from a moving branch while
-the instance is serving production traffic.
+`--build` builds the frontend and the `deploy/docker/Dockerfile` image as
+`local/openpost:fork-<commit>` while the old container keeps serving. It then
+stops OpenPost, archives the data volume with `.env` and both Compose files,
+restores that archive into a scratch volume to check the database, and starts
+the new image. It reports readiness, the running version, the newest applied
+migration, and whether the main row counts changed.
 
-On the Mac mini, update only after a backup:
+To run a published upstream release instead, pin it by digest:
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.macmini.yml pull openpost
-docker compose -f docker-compose.yml -f docker-compose.macmini.yml up -d openpost
-curl -fsS https://openpost.example.com/api/v1/ready
-docker compose -f docker-compose.yml -f docker-compose.macmini.yml logs --tail=100 openpost
+scripts/fork/macmini-deploy.sh --image ghcr.io/getopenpost/openpost:v7.37.1@sha256:<digest>
 ```
 
-The combined `all` container applies database migrations at startup. If a
-release must be rolled back, restore the database backup that matches the
-older image; an older binary may not understand a newer schema.
+The combined `all` container applies database migrations at startup, so roll
+back the data and the image together. Each backup records the image that was
+running:
+
+```sh
+scripts/fork/macmini-deploy.sh --restore ~/Backups/openpost/<timestamp>
+```
+
+Copy each backup off the Mac mini after a deployment:
+
+```sh
+rsync -a macmini:Backups/openpost/<timestamp>/ ~/Backups/openpost/<timestamp>/
+```
 
 ## Operational boundaries
 
@@ -181,23 +188,26 @@ The MacBook instance is stopped. Do not run a second worker against the same wor
 ### Mac mini deployment files
 
 - OpenPost checkout: `/Users/aiden/Dev/2-area/nomadamas/12-playground/openpost`
-- Branch: `dev/macmini-openpost`
+- Branch: `main` (`--build` fast-forwards it to `origin/main`)
 - Base Compose file: `docker-compose.yml` (the portable default for ordinary local users)
-- Mac mini deployment file: `docker-compose.macmini.yml` (the Mac mini-specific override)
-- Persistent volume: `openpost_openpost_data`
-- Runtime image: `ghcr.io/getopenpost/openpost:v7.35.1`
+- Mac mini deployment file: `docker-compose.macmini.yml` (the Mac mini-specific override; pins the Compose project `openpost`)
+- Persistent volume: `openpost_openpost_data` (external and named explicitly, so moving the checkout keeps the data)
+- Runtime image: `DEPLOY_IMAGE` in the private `.env`, written by `scripts/fork/macmini-deploy.sh`
+- Backups: `/Users/aiden/Backups/openpost/<timestamp>/`, one per deployment
 - OpenPost host port: `127.0.0.1:18081`
 - Shared network: `aiden-edge`
 - Ingress checkout: `/Users/aiden/Dev/agent-portability`
 - Ingress tunnel: `macmini-services`
 
 The base Compose file remains portable for ordinary local users. On the Mac
-mini, always layer the Mac mini deployment file over it so the pinned image,
-private host binding, shared ingress network, and base `openpost_data` volume
-are applied together:
+mini, always layer the Mac mini deployment file over it so the recorded image,
+private host binding, shared ingress network, and named volume are applied
+together. The deploy script also writes `COMPOSE_FILE` to `.env`, so a plain
+`docker compose` in the checkout uses both files, and the overlay refuses to
+start without `DEPLOY_IMAGE`:
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.macmini.yml config
+docker compose config
 ```
 
 The commands below assume the Mac mini checkout has its private `.env` file.
@@ -208,15 +218,12 @@ Keep `.env` private. It contains the stable `OPENPOST_ENCRYPTION_KEY` and `OPENP
 
 ### Develop and verify
 
+Building the frontend or backend in the checkout does not change the running
+container, which always runs an image. Deploy a merged change with
+`--build` as described above, then check the public URL:
+
 ```sh
-ssh macmini
-cd /Users/aiden/Dev/2-area/nomadamas/12-playground/openpost
-export PATH="$HOME/.orbstack/bin:/opt/homebrew/bin:$HOME/.local/bin:$PATH"
-bun install --frozen-lockfile
-bun run build -- frontend
-bun run build -- backend
-docker compose -f docker-compose.yml -f docker-compose.macmini.yml up -d --force-recreate
-curl -fsS http://127.0.0.1:18081/api/v1/ready
+ssh macmini '/Users/aiden/Dev/2-area/nomadamas/12-playground/openpost/scripts/fork/macmini-deploy.sh --status'
 curl -fsS https://openpost.aidenahn.com/api/v1/ready
 ```
 
@@ -226,7 +233,7 @@ To restart the Mac mini service without changing its image or configuration,
 use the same overlay and check readiness again:
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.macmini.yml restart openpost
+docker compose restart openpost
 curl -fsS http://127.0.0.1:18081/api/v1/ready
 ```
 
