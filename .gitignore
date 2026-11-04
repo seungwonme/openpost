@@ -109,9 +109,8 @@ apps/marketing/static/assets/
 apps/marketing/static/og/
 /dist/public-site/
 
-# Local reference checkouts
-/references/
-/docs/references/*/
+# Local reference checkouts and research
+/docs/references/
 
 # Wrangler
 .wrangler/
