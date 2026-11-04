@@ -26,11 +26,11 @@ the backup taken before the fork deployment instead.
 
 ## Deploy to the Mac mini
 
-Production runs on the Mac mini at `https://openpost.aidenahn.com`. The MacBook does not run the
+Production runs on the Mac mini at `https://post.aidenahn.com`. The MacBook does not run the
 app. Merge a change into `main`, then build and run it on the Mac mini:
 
 ```sh
-ssh macmini '<checkout>/scripts/fork/macmini-deploy.sh --build'
+ssh macmini '/Users/aiden/Dev/1-project/openpost/scripts/fork/macmini-deploy.sh --build'
 rsync -a macmini:Backups/openpost/<timestamp>/ ~/Backups/openpost/<timestamp>/
 ```
 

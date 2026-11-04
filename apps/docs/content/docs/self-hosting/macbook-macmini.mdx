@@ -125,7 +125,7 @@ involved. `scripts/fork/macmini-deploy.sh` does every step and refuses commits
 that are not on `origin/main`:
 
 ```sh
-ssh macmini '/Users/aiden/Dev/2-area/nomadamas/12-playground/openpost/scripts/fork/macmini-deploy.sh --build'
+ssh macmini '/Users/aiden/Dev/1-project/openpost/scripts/fork/macmini-deploy.sh --build'
 ```
 
 `--build` builds the frontend and the `deploy/docker/Dockerfile` image as
@@ -172,22 +172,22 @@ For the full backup, upgrade, and recovery procedure, see [Maintenance](/self-ho
 
 ## Mac mini runtime cutover
 
-The production OpenPost runtime for this fork runs on the Mac mini. Develop over SSH in the Mac mini checkout and verify the public application through `https://openpost.aidenahn.com`.
+The production OpenPost runtime for this fork runs on the Mac mini. Develop over SSH in the Mac mini checkout and verify the public application through `https://post.aidenahn.com`.
 
 ```text
-SSH -> /Users/aiden/Dev/2-area/nomadamas/12-playground/openpost
+SSH -> /Users/aiden/Dev/1-project/openpost
      -> Docker Compose OpenPost (127.0.0.1:18081)
      -> aiden-edge Docker network
      -> Caddy gateway
      -> macmini-services Cloudflare Tunnel
-     -> https://openpost.aidenahn.com
+     -> https://post.aidenahn.com
 ```
 
 The MacBook instance is stopped. Do not run a second worker against the same workspace or provider accounts.
 
 ### Mac mini deployment files
 
-- OpenPost checkout: `/Users/aiden/Dev/2-area/nomadamas/12-playground/openpost`
+- OpenPost checkout: `/Users/aiden/Dev/1-project/openpost`
 - Branch: `main` (`--build` fast-forwards it to `origin/main`)
 - Base Compose file: `docker-compose.yml` (the portable default for ordinary local users)
 - Mac mini deployment file: `docker-compose.macmini.yml` (the Mac mini-specific override; pins the Compose project `openpost`)
@@ -223,11 +223,11 @@ container, which always runs an image. Deploy a merged change with
 `--build` as described above, then check the public URL:
 
 ```sh
-ssh macmini '/Users/aiden/Dev/2-area/nomadamas/12-playground/openpost/scripts/fork/macmini-deploy.sh --status'
-curl -fsS https://openpost.aidenahn.com/api/v1/ready
+ssh macmini '/Users/aiden/Dev/1-project/openpost/scripts/fork/macmini-deploy.sh --status'
+curl -fsS https://post.aidenahn.com/api/v1/ready
 ```
 
-The public URL is the test surface. OAuth callbacks and provider media URLs continue to use `openpost.aidenahn.com`; do not rename the hostname without re-registering every provider callback.
+The public URL is the test surface. OAuth callbacks and provider media URLs use `post.aidenahn.com`. The previous host `openpost.aidenahn.com` answers with a 308 redirect to it until it is retired. Changing the hostname again means updating `OPENPOST_APP_URL`, `OPENPOST_PUBLIC_URL`, and `OPENPOST_MEDIA_URL` in `.env`, each provider app's redirect URI under Settings -> Instance -> Configuration, and the redirect URI registered in every provider console.
 
 To restart the Mac mini service without changing its image or configuration,
 use the same overlay and check readiness again:
@@ -241,8 +241,10 @@ curl -fsS http://127.0.0.1:18081/api/v1/ready
 
 The shared Caddy and Cloudflare configuration owns the public route:
 
-- `infra/ingress/Caddyfile`: `openpost.aidenahn.com` proxies to `openpost:8080`.
-- `infra/ingress/cloudflared.yml`: `openpost.aidenahn.com` routes to the shared gateway.
+- `infra/ingress/Caddyfile`: `post.aidenahn.com` proxies to `openpost:8080`; `openpost.aidenahn.com` redirects to it with 308.
+- `infra/ingress/cloudflared.yml`: both hosts route to the shared gateway.
+- DNS: `post.aidenahn.com` is a tunnel CNAME created with `cloudflared tunnel route dns macmini-services post.aidenahn.com`.
+- History: seungwonme/agent-portability#34 and its pull request #35.
 
 After changing those files, validate and restart the shared ingress from `/Users/aiden/Dev/agent-portability`:
 
