@@ -24,7 +24,7 @@
 	import { autoKeyframeStore } from '$lib/video-editor/timeline/stores/auto-keyframe-store.svelte';
 	import { timelineStore } from '$lib/video-editor/timeline/stores/timeline-store.svelte';
 	import { isTrackEffectivelyLocked } from '../timeline/utils/track-groups';
-	import ScrubbableNumberInput from '$lib/components/editor-scrubbable-number-input.svelte';
+	import { ScrubField } from '$lib/components/editor-density';
 
 	let {
 		itemId,
@@ -252,7 +252,7 @@
 				class="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-[9px] font-semibold text-[var(--video-editor-muted)]"
 				>{shortLabel}</span
 			>
-			<ScrubbableNumberInput
+			<ScrubField
 				disabled={locked}
 				{ariaLabel}
 				value={mixedValue(property)}
@@ -260,12 +260,13 @@
 				{min}
 				{max}
 				step={1}
-				decimals={0}
-				class="h-[22px] w-full rounded border border-[var(--video-editor-border)] bg-[var(--video-editor-control)] py-1 pr-7 pl-5 text-right text-[11px] text-[var(--video-editor-text)] tabular-nums transition-colors outline-none hover:border-[var(--video-editor-focus-border)] focus:border-[var(--video-editor-focus-border)] focus:ring-1 focus:ring-[color-mix(in_oklch,var(--video-editor-focus)_35%,transparent)] [@media(pointer:coarse)]:h-11"
+				precision={0}
+				valueWidth="100%"
+				class="h-[var(--editor-22,22px)] rounded border border-[var(--video-editor-border)] bg-[var(--video-editor-control)] py-1 pr-7 pl-5 text-right text-[11px] text-[var(--video-editor-text)] tabular-nums transition-colors outline-none hover:border-[var(--video-editor-focus-border)] focus:border-[var(--video-editor-focus-border)] focus:ring-1 focus:ring-[color-mix(in_oklch,var(--video-editor-focus)_35%,transparent)] [@media(pointer:coarse)]:h-11"
 				onbegin={beginGesture}
-				onlive={(value) => writeLive(property, value)}
-				oncommit={(value) => commitGesture(property, value)}
-				oncancel={cancelGesture}
+				onValueChange={(value) => writeLive(property, value)}
+				onValueCommit={(value) => commitGesture(property, value)}
+				onValueCancel={cancelGesture}
 			/>
 			<span
 				class="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-[9px] text-[var(--video-editor-muted)]"
@@ -278,11 +279,11 @@
 
 <div class="@container/transform flex flex-col gap-2" data-testid="clip-transform-panel">
 	<section
-		class="overflow-hidden rounded-md border border-[var(--video-editor-border)] bg-[var(--video-editor-panel)]"
+		class="border-t border-[var(--video-editor-border)]"
 		data-testid="clip-transform-section"
 	>
 		<h3
-			class="flex h-[25px] items-center gap-2 border-b border-[var(--video-editor-border)] px-2.5 text-[10px] font-semibold tracking-wider text-[var(--video-editor-muted)] uppercase"
+			class="flex h-[25px] items-center gap-2 border-b border-[var(--video-editor-border)] px-2.5 text-xs font-medium text-[var(--video-editor-muted)]"
 		>
 			<ProtectedIcon icon="editor-move" class="size-3.5 text-[var(--video-editor-muted)]" />
 			{m.video_editor_property_transform()}
@@ -319,6 +320,7 @@
 						type="button"
 						disabled={locked}
 						class="grid size-[22px] shrink-0 place-items-center rounded text-[var(--video-editor-muted)] hover:bg-[var(--video-editor-control-hover)] hover:text-[var(--video-editor-muted)] focus-visible:outline-2 focus-visible:outline-[var(--video-editor-focus)] [@media(pointer:coarse)]:size-11"
+						data-property-affordance
 						aria-label={m.video_editor_property_reset_position()}
 						onclick={() => reset(() => ({ x: 0, y: 0 }))}
 					>
@@ -360,6 +362,7 @@
 						type="button"
 						disabled={locked}
 						class="grid size-[22px] shrink-0 place-items-center rounded text-[var(--video-editor-muted)] hover:bg-[var(--video-editor-control-hover)] hover:text-[var(--video-editor-muted)] focus-visible:outline-2 focus-visible:outline-[var(--video-editor-focus)] [@media(pointer:coarse)]:size-11"
+						data-property-affordance
 						aria-label={m.video_editor_property_reset_size()}
 						onclick={resetSize}
 					>
@@ -405,6 +408,7 @@
 						type="button"
 						disabled={locked}
 						class="grid size-[22px] shrink-0 place-items-center rounded text-[var(--video-editor-muted)] hover:bg-[var(--video-editor-control-hover)] hover:text-[var(--video-editor-muted)] focus-visible:outline-2 focus-visible:outline-[var(--video-editor-focus)] [@media(pointer:coarse)]:size-11"
+						data-property-affordance
 						aria-label={m.video_editor_property_reset_rotation()}
 						onclick={() => reset(() => ({ rotation: 0 }))}
 					>
@@ -413,7 +417,18 @@
 				</div>
 			</div>
 
-			<EditorDisclosure label={m.video_editor_property_anchor()}>
+			<EditorDisclosure
+				label={m.video_editor_property_anchor()}
+				summary={items.some(
+					(item) =>
+						item.transform?.anchorX !== undefined ||
+						item.transform?.anchorY !== undefined ||
+						item.keyframes?.anchorX?.frames.length ||
+						item.keyframes?.anchorY?.frames.length
+				)
+					? m.video_editor_modified()
+					: undefined}
+			>
 				<div
 					class="grid grid-cols-1 gap-1 px-2.5 py-2 @min-[24rem]/transform:grid-cols-[4.25rem_minmax(0,1fr)] @min-[24rem]/transform:gap-2"
 				>
@@ -445,6 +460,7 @@
 							type="button"
 							disabled={locked}
 							class="grid size-[22px] shrink-0 place-items-center rounded text-[var(--video-editor-muted)] hover:bg-[var(--video-editor-control-hover)] hover:text-[var(--video-editor-muted)] focus-visible:outline-2 focus-visible:outline-[var(--video-editor-focus)] [@media(pointer:coarse)]:size-11"
+							data-property-affordance
 							aria-label={m.video_editor_property_reset_anchor()}
 							onclick={() =>
 								reset((item) => ({
@@ -459,7 +475,7 @@
 			</EditorDisclosure>
 
 			<div class="grid grid-cols-[4.25rem_minmax(0,1fr)] items-center gap-2 px-2.5 py-2">
-				<span class="text-[10px] font-medium text-[var(--video-editor-muted)]"
+				<span class="text-xs font-medium text-[var(--video-editor-muted)]"
 					>{m.video_editor_property_flip()}</span
 				>
 				<div class="grid grid-cols-2 gap-1">
@@ -468,27 +484,33 @@
 						disabled={locked}
 						size="sm"
 						variant="ghost"
-						class="h-[22px] justify-center border border-[var(--video-editor-border)] px-2 text-[10px]"
+						class="h-[var(--editor-22,22px)] justify-center border border-[var(--video-editor-border)] px-2 aria-pressed:bg-[var(--video-editor-selection)] aria-pressed:text-[var(--video-editor-selection-text)]"
 						aria-pressed={items.every((item) => item.transform?.flipHorizontal === true)}
-						onclick={() => toggleFlip('flipHorizontal')}>{m.video_editor_property_flip_x()}</Button
+						aria-label={m.video_editor_property_flip_x()}
+						title={m.video_editor_property_flip_x()}
+						onclick={() => toggleFlip('flipHorizontal')}
 					>
+						<ProtectedIcon icon="editor-flip-horizontal" class="size-3.5" />
+					</Button>
 					<Button
 						type="button"
 						disabled={locked}
 						size="sm"
 						variant="ghost"
-						class="h-[22px] justify-center border border-[var(--video-editor-border)] px-2 text-[10px]"
+						class="h-[var(--editor-22,22px)] justify-center border border-[var(--video-editor-border)] px-2 aria-pressed:bg-[var(--video-editor-selection)] aria-pressed:text-[var(--video-editor-selection-text)]"
 						aria-pressed={items.every((item) => item.transform?.flipVertical === true)}
-						onclick={() => toggleFlip('flipVertical')}>{m.video_editor_property_flip_y()}</Button
+						aria-label={m.video_editor_property_flip_y()}
+						title={m.video_editor_property_flip_y()}
+						onclick={() => toggleFlip('flipVertical')}
 					>
+						<ProtectedIcon icon="editor-flip-vertical" class="size-3.5" />
+					</Button>
 				</div>
 			</div>
 		</div>
 	</section>
 
-	<section
-		class="overflow-hidden rounded-md border border-[var(--video-editor-border)] bg-[var(--video-editor-panel)]"
-	>
+	<section class="border-t border-[var(--video-editor-border)]">
 		<EditorDisclosure
 			label={m.video_editor_property_appearance()}
 			summary={items.some(
@@ -499,7 +521,7 @@
 					item.keyframes?.opacity?.frames.length ||
 					item.keyframes?.cornerRadius?.frames.length
 			)
-				? m.video_editor_workspace_active()
+				? m.video_editor_modified()
 				: undefined}
 		>
 			<div class="divide-y divide-[var(--video-editor-border)]">
@@ -538,6 +560,7 @@
 							type="button"
 							disabled={locked}
 							class="grid size-[22px] shrink-0 place-items-center rounded text-[var(--video-editor-muted)] hover:bg-[var(--video-editor-control-hover)] hover:text-[var(--video-editor-muted)] focus-visible:outline-2 focus-visible:outline-[var(--video-editor-focus)] [@media(pointer:coarse)]:size-11"
+							data-property-affordance
 							aria-label={m.video_editor_property_reset_opacity()}
 							onclick={() => reset(() => ({ opacity: 1 }))}
 						>
@@ -550,7 +573,7 @@
 						>{m.video_editor_blend_mode()}</span
 					>
 					<AppSelect
-						class="h-[22px] min-w-0 text-xs"
+						class="h-[var(--editor-22,22px)] min-w-0 text-xs"
 						value={hasShapeMask() ? 'normal' : mixedBlendMode()}
 						options={blendOptions}
 						placeholder={m.video_editor_property_mixed()}
@@ -576,6 +599,7 @@
 							type="button"
 							disabled={locked}
 							class="grid size-[22px] shrink-0 place-items-center rounded text-[var(--video-editor-muted)] hover:bg-[var(--video-editor-control-hover)] hover:text-[var(--video-editor-muted)] focus-visible:outline-2 focus-visible:outline-[var(--video-editor-focus)] [@media(pointer:coarse)]:size-11"
+							data-property-affordance
 							aria-label={m.video_editor_property_reset_radius()}
 							onclick={() => reset(() => ({ cornerRadius: 0 }))}
 						>

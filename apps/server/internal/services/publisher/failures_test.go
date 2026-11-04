@@ -22,6 +22,7 @@ func TestClassifyFailureUsesStableTaxonomyAndRetryPolicy(t *testing.T) {
 		{"validation", &platform.HTTPError{StatusCode: 422, Code: "invalid_media"}, FailureValidation, false, FailureActionEdit},
 		{"expired auth", &platform.HTTPError{StatusCode: 401, Code: "token_expired"}, FailureAuthExpired, false, FailureActionReconnect},
 		{"reconnect", &platform.HTTPError{StatusCode: 401}, FailureReconnectRequired, false, FailureActionReconnect},
+		{"discord bot token invalid", &platform.HTTPError{StatusCode: 401, Code: "discord:bot_token_invalid"}, FailurePermission, false, FailureActionProvider},
 		{"permission", &platform.HTTPError{StatusCode: 403}, FailurePermission, false, FailureActionProvider},
 		{"youtube thumbnail verification", &platform.HTTPError{StatusCode: 403, Code: "youtube:thumbnail_channel_verification_required"}, FailurePermission, false, FailureActionProvider},
 		{"billing", &platform.HTTPError{StatusCode: 402}, FailureBillingRequired, false, FailureActionBilling},
@@ -66,7 +67,7 @@ func TestClassifyMetaFailuresUseDistinctRecoveryActions(t *testing.T) {
 		{"checkpoint", &platform.HTTPError{StatusCode: 401, Code: "meta:checkpoint:190:459", Subcode: "459"}, FailureReconnectRequired, false, FailureActionReconnect, "security check"},
 		{"instagram checkpoint", &platform.HTTPError{StatusCode: 401, Code: "meta:checkpoint:instagram"}, FailureReconnectRequired, false, FailureActionReconnect, "instagram.com"},
 		{"lost page role", &platform.HTTPError{StatusCode: 403, Code: "meta:missing_page_role:190:492", Subcode: "492"}, FailurePermission, false, FailureActionReconnect, "role on this Page"},
-		{"missing object never retries", &platform.HTTPError{StatusCode: 400, Code: "meta:nonexistent:100:33", Subcode: "33"}, FailureValidation, false, FailureActionEdit, "no longer exists"},
+		{"missing object never retries", &platform.HTTPError{StatusCode: 400, Code: "meta:nonexistent:100:33", Subcode: "33"}, FailureValidation, false, FailureActionEdit, "cannot access"},
 		{"silent audio retries", &platform.HTTPError{StatusCode: 400, Code: "meta:media_silent_audio:2207082"}, FailureProviderProcessing, true, FailureActionRetry, "volume to 0"},
 		{"exhausted container propagation retry stays local", &platform.HTTPError{StatusCode: 400, Code: "meta:media_not_ready:9004:2207052"}, FailureProviderProcessing, false, FailureActionRetry, "safe creation step"},
 		{"format rejection", &platform.HTTPError{StatusCode: 400, Code: "meta:media_format:2207085"}, FailureValidation, false, FailureActionEdit, "format, duration"},
@@ -109,6 +110,17 @@ func TestDiscordAttachmentPermissionFailureExplainsHowToPublish(t *testing.T) {
 	require.Equal(t, FailureActionProvider, failure.Action)
 	require.Contains(t, failure.Message, "Attach Files")
 	require.Contains(t, failure.Message, "remove the attachments")
+}
+
+func TestClassifyDiscordBotTokenInvalidDoesNotReconnectUserAccount(t *testing.T) {
+	failure := ClassifyFailure(&platform.HTTPError{
+		StatusCode: http.StatusUnauthorized,
+		Code:       "discord:bot_token_invalid",
+	})
+	require.Equal(t, FailurePermission, failure.Kind)
+	require.False(t, failure.Retryable)
+	require.NotEqual(t, FailureActionReconnect, failure.Action)
+	require.Contains(t, failure.Message, "administrator must update the Discord bot token in the server settings")
 }
 
 func TestPinterestBoardFailureIsTerminalAndNamesBoard(t *testing.T) {

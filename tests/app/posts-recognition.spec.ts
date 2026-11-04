@@ -161,7 +161,7 @@ test("draft gallery keeps content, selection and search without repeated row chr
   await expect(gallery.getByText("Delivery details", { exact: true })).toHaveCount(0);
   await expect(gallery.getByText("Draft", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Showing 3 of 3 results", { exact: true })).toHaveCount(0);
-  await expect(page.getByTestId("desktop-sidebar-planner")).toBeVisible();
+  await expect(page.getByTestId("desktop-sidebar-planner")).toHaveCount(0);
   await expect
     .poll(() =>
       gallery
@@ -242,7 +242,7 @@ test("draft gallery keeps content, selection and search without repeated row chr
   await page.goto(`/publications?tab=drafts&view=list&workspace_id=${workspace.id}`);
   await expect(page.getByTestId("publication-list")).toBeVisible();
   await views.getByRole("link", { name: "Grid", exact: true }).click();
-  const search = page.getByRole("textbox", { name: "Search posts", exact: true });
+  const search = page.getByRole("searchbox", { name: "Search posts", exact: true });
   await search.fill("customer interview");
   await expect(gallery.locator("article")).toHaveCount(1);
   await gallery.getByRole("link").click();

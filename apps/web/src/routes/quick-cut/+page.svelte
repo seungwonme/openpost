@@ -12,7 +12,7 @@ LosslessCut (GPL - behavioral reference only, no code ported).
 	import EditorStart from '$lib/components/editor-start.svelte';
 	import WorkspaceGatePanel from '$lib/video-editor/components/workspace-gate-panel.svelte';
 	import { createWorkspaceGate } from '$lib/video-editor/gate/workspace-gate.svelte';
-	import { ToolbarGroup } from '$lib/components/editor-density';
+	import { Disclosure, ToolbarGroup } from '$lib/components/editor-density';
 	import { Input } from '$lib/components/ui/input';
 	import TranscriptCutPanel from '$lib/quick-cut/components/TranscriptCutPanel.svelte';
 	import RepurposePanel from '$lib/quick-cut/components/RepurposePanel.svelte';
@@ -1678,7 +1678,25 @@ LosslessCut (GPL - behavioral reference only, no code ported).
 	}
 
 	function onKeydown(event: KeyboardEvent): void {
-		if (panel === 'repurpose') return;
+		if (panel === 'repurpose') {
+			// Playback shortcuts keep working; Escape returns to the cuts panel.
+			// Text entry keeps its own Escape behavior.
+			if (handleGlobalPlayPauseShortcut(event, keyboardShortcuts.bindings.PLAY_PAUSE, togglePlay))
+				return;
+			if (event.repeat || event.defaultPrevented) return;
+			if (event.key === 'Escape') {
+				const target = event.target;
+				const inTextEntry =
+					target instanceof HTMLElement &&
+					Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+				if (!inTextEntry) {
+					event.preventDefault();
+					event.stopPropagation();
+					panel = 'cuts';
+				}
+			}
+			return;
+		}
 		if (handleGlobalPlayPauseShortcut(event, keyboardShortcuts.bindings.PLAY_PAUSE, togglePlay))
 			return;
 		if (event.repeat) return;
@@ -1990,11 +2008,7 @@ LosslessCut (GPL - behavioral reference only, no code ported).
 	{/if}
 	<main class="quick-cut-main">
 		{#if sources.length === 0}
-			<EditorStart
-				kind="quick-cut"
-				title={m.quick_cut_title()}
-				description={m.quick_cut_empty_body()}
-			>
+			<EditorStart title={m.quick_cut_title()} description={m.quick_cut_empty_body()}>
 				{#snippet actions()}
 					<Button disabled={importingSource || openingProjectId !== null} onclick={openFiles}
 						><ThemeIcon role="add" />{m.quick_cut_open_multiple()}</Button
@@ -2015,13 +2029,13 @@ LosslessCut (GPL - behavioral reference only, no code ported).
 							size="sm"
 							variant={storageMode === 'cloud' ? 'secondary' : 'ghost'}
 							aria-pressed={storageMode === 'cloud'}
-							onclick={() => chooseStorage('cloud')}>{m.video_editor_saved_cloud()}</Button
+							onclick={() => chooseStorage('cloud')}>{m.editor_storage_choice_cloud()}</Button
 						>{/if}
 					<Button
 						size="sm"
 						variant={storageMode === 'local' ? 'secondary' : 'ghost'}
 						aria-pressed={storageMode === 'local'}
-						onclick={() => chooseStorage('local')}>{m.video_editor_local_only()}</Button
+						onclick={() => chooseStorage('local')}>{m.editor_storage_choice_local()}</Button
 					>
 				</div>
 				<section
@@ -2083,7 +2097,7 @@ LosslessCut (GPL - behavioral reference only, no code ported).
 					{#if !cloudLoading && !cloudProjects.length && !localProjects.length}<p
 							class="py-6 text-sm text-muted-foreground"
 						>
-							{m.video_editor_projects_empty()}
+							{m.quick_cut_projects_empty()}
 						</p>{/if}
 				</section>
 				{#if localGate.state === 'unavailable'}
@@ -2123,58 +2137,6 @@ LosslessCut (GPL - behavioral reference only, no code ported).
 				</InlineNotice>
 			{/if}
 
-			{#if panel !== 'repurpose'}
-				<div class="quick-cut-toolbar">
-					<ToolbarGroup
-						ariaLabel={m.quick_cut_tools()}
-						class="h-auto min-w-0 flex-wrap border-0 bg-transparent"
-					>
-						<Button
-							size="sm"
-							disabled={!project || !cloudWorkspaceId || !$auth.user?.id || exporting}
-							onclick={() => {
-								videoEl?.pause();
-								stopPreview();
-								panel = 'repurpose';
-							}}>{m.repurpose_find()}</Button
-						>
-						<Button size="sm" variant="outline" onclick={markIn}>
-							{m.quick_cut_in()}<kbd class="text-muted-foreground"
-								>{shortcutLabel(keyboardShortcuts.bindings.MARK_IN)}</kbd
-							>
-						</Button>
-						<Button size="sm" variant="outline" onclick={markOut}>
-							{m.quick_cut_out()}<kbd class="text-muted-foreground"
-								>{shortcutLabel(keyboardShortcuts.bindings.MARK_OUT)}</kbd
-							>
-						</Button>
-						<Button
-							size="sm"
-							variant="secondary"
-							disabled={!selectionReady || exporting}
-							onclick={removeSelection}>{m.quick_cut_remove_selection()}</Button
-						>
-						<Button
-							size="sm"
-							variant={selectionReady ? 'default' : 'ghost'}
-							disabled={!selectionReady || exporting}
-							onclick={addSegment}>{m.quick_cut_keep_selection()}</Button
-						>
-					</ToolbarGroup>
-				</div>
-				<div
-					class="flex min-h-7 shrink-0 flex-wrap items-center gap-x-3 border-b px-3 py-1 text-xs text-muted-foreground"
-					role="status"
-				>
-					{#if selectionReady && inPoint && outPoint}
-						<span class="font-mono whitespace-nowrap tabular-nums"
-							>{formatTimecode(inPoint.time)} → {formatTimecode(outPoint.time)}</span
-						>
-						<span>{m.quick_cut_selection_ready()}</span>
-					{:else if inPoint}<span>{m.quick_cut_selection_end()}</span>
-					{:else}<span>{m.quick_cut_selection_start()}</span>{/if}
-				</div>
-			{/if}
 			<div class="source-strip">
 				<SourceBar
 					{sources}
@@ -2293,7 +2255,63 @@ LosslessCut (GPL - behavioral reference only, no code ported).
 							<span class="font-mono text-xs tabular-nums"
 								>{formatTimecode(currentTime)} / {formatTimecode(activeSource?.duration ?? 0)}</span
 							>
-							<div class="ml-auto flex items-center gap-1">
+							<div class="flex flex-wrap items-center gap-1">
+								<Button size="sm" variant="outline" onclick={markIn}>
+									{m.quick_cut_in()}<kbd class="text-muted-foreground"
+										>{shortcutLabel(keyboardShortcuts.bindings.MARK_IN)}</kbd
+									>
+								</Button>
+								<Button size="sm" variant="outline" onclick={markOut}>
+									{m.quick_cut_out()}<kbd class="text-muted-foreground"
+										>{shortcutLabel(keyboardShortcuts.bindings.MARK_OUT)}</kbd
+									>
+								</Button>
+								<Button
+									size="sm"
+									variant="secondary"
+									disabled={!selectionReady || exporting}
+									onclick={removeSelection}>{m.quick_cut_remove_selection()}</Button
+								>
+								<Button
+									size="sm"
+									variant={selectionReady ? 'default' : 'ghost'}
+									disabled={!selectionReady || exporting}
+									onclick={addSegment}>{m.quick_cut_keep_selection()}</Button
+								>
+							</div>
+							<div class="ml-auto flex flex-wrap items-center gap-1">
+								<Button
+									size="sm"
+									variant="ghost"
+									aria-pressed={loopMode !== 'off'}
+									onclick={toggleLoopMode}
+								>
+									{m.quick_cut_loop_label()}: {loopMode === 'off'
+										? m.quick_cut_loop_off()
+										: loopMode === 'all'
+											? m.quick_cut_loop_all()
+											: m.quick_cut_loop_segment()}
+								</Button>
+								<Button
+									size="icon-sm"
+									variant="outline"
+									aria-label={m.quick_cut_zoom_out()}
+									disabled={timelineViewport.zoom <= 1}
+									onclick={() => zoomTimeline(0.5)}>−</Button
+								>
+								<Button
+									size="sm"
+									variant="ghost"
+									aria-label={m.quick_cut_zoom_reset()}
+									onclick={resetTimelineZoom}>{Math.round(timelineViewport.zoom * 100)}%</Button
+								>
+								<Button
+									size="icon-sm"
+									variant="outline"
+									aria-label={m.quick_cut_zoom_in()}
+									disabled={timelineViewport.zoom >= 32}
+									onclick={() => zoomTimeline(2)}>+</Button
+								>
 								<Button
 									size="sm"
 									variant="ghost"
@@ -2356,10 +2374,7 @@ LosslessCut (GPL - behavioral reference only, no code ported).
 									onPreview={previewSegment}
 									onExport={(segment) => void handleExportOne(segment)}
 								/>
-								<details class="mt-4 border-t pt-3">
-									<summary class="cursor-pointer text-xs text-muted-foreground"
-										>{m.quick_cut_segment_files()}</summary
-									>
+								<Disclosure class="mt-4 border-t" label={m.quick_cut_segment_files()}>
 									<div class="mt-2">
 										<DropdownMenu.Root>
 											<DropdownMenu.Trigger>
@@ -2404,7 +2419,7 @@ LosslessCut (GPL - behavioral reference only, no code ported).
 											</DropdownMenu.Content>
 										</DropdownMenu.Root>
 									</div>
-								</details>
+								</Disclosure>
 								{#if hasOverlapError}<p role="alert" class="mt-2 text-xs text-destructive">
 										{m.quick_cut_overlap_error()}
 									</p>
@@ -2424,6 +2439,19 @@ LosslessCut (GPL - behavioral reference only, no code ported).
 										onseek={seekTo}
 									/>{/key}
 							{:else if panel === 'cleanup' && activeSource}
+								{#if project && cloudWorkspaceId && $auth.user?.id}
+									<Button
+										size="sm"
+										variant="outline"
+										class="mb-3 w-full"
+										disabled={exporting}
+										onclick={() => {
+											videoEl?.pause();
+											stopPreview();
+											panel = 'repurpose';
+										}}>{m.repurpose_find()}</Button
+									>
+								{/if}
 								{#key `${activeSource.id}:${activeSource.selectedAudioTrackIndices?.join(',')}`}<CleanupPanel
 										source={activeSource}
 										disabled={exporting}
@@ -2533,16 +2561,14 @@ LosslessCut (GPL - behavioral reference only, no code ported).
 										disabled={exporting || !preflight?.eligible}
 										onclick={handleSendToOpenPost}>{m.quick_cut_send_to_openpost()}</Button
 									>
-									{#if activeSource}<details>
-											<summary class="cursor-pointer text-xs">{m.quick_cut_tracks()}</summary
-											><StreamSelector
+									{#if activeSource}<Disclosure label={m.quick_cut_tracks()}>
+											<StreamSelector
 												source={activeSource}
 												onChange={(patch) => updateSourceStreams(activeSource.id, patch)}
 											/>
-										</details>{/if}
-									<details>
-										<summary class="cursor-pointer text-xs">{m.quick_cut_advanced()}</summary><Label
-											class="mt-3 flex items-start gap-2 text-xs"
+										</Disclosure>{/if}
+									<Disclosure label={m.quick_cut_advanced()}>
+										<Label class="mt-3 flex items-start gap-2 text-xs"
 											><Checkbox
 												checked={removeMarkedRanges}
 												onCheckedChange={(checked) => {
@@ -2551,7 +2577,7 @@ LosslessCut (GPL - behavioral reference only, no code ported).
 												}}
 											/>{m.quick_cut_remove_marked_ranges()}</Label
 										>
-									</details>
+									</Disclosure>
 								</div>
 							{/if}
 						</div>
@@ -2578,38 +2604,7 @@ LosslessCut (GPL - behavioral reference only, no code ported).
 								aria-label={m.quick_cut_add_marker()}
 								onclick={addMarker}><ProtectedIcon icon="editor-marker" class="size-3.5" /></Button
 							>
-							<Button
-								size="sm"
-								variant="ghost"
-								aria-pressed={loopMode !== 'off'}
-								onclick={toggleLoopMode}
-							>
-								{m.quick_cut_loop_label()}: {loopMode === 'off'
-									? m.quick_cut_loop_off()
-									: loopMode === 'all'
-										? m.quick_cut_loop_all()
-										: m.quick_cut_loop_segment()}
-							</Button>
-							<Button
-								size="icon-sm"
-								variant="outline"
-								aria-label={m.quick_cut_zoom_out()}
-								disabled={timelineViewport.zoom <= 1}
-								onclick={() => zoomTimeline(0.5)}>−</Button
-							>
-							<Button
-								size="sm"
-								variant="ghost"
-								aria-label={m.quick_cut_zoom_reset()}
-								onclick={resetTimelineZoom}>{Math.round(timelineViewport.zoom * 100)}%</Button
-							>
-							<Button
-								size="icon-sm"
-								variant="outline"
-								aria-label={m.quick_cut_zoom_in()}
-								disabled={timelineViewport.zoom >= 32}
-								onclick={() => zoomTimeline(2)}>+</Button
-							>
+							> > >
 						</ToolbarGroup>
 					</div>
 				</div>

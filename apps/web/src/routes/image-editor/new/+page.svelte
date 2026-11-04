@@ -29,6 +29,7 @@
 	import { startImageEditorMetric } from '$lib/image-editor/telemetry';
 	import EditorStart from '$lib/components/editor-start.svelte';
 	import EditorFormatButton from '$lib/components/editor-format-button.svelte';
+	import { Disclosure } from '$lib/components/editor-density';
 	import SectionHeading from '$lib/components/section-heading.svelte';
 	import TemplatePreview from '$lib/image-editor/components/template-preview.svelte';
 	import { editorHandoffReturnURL } from '$lib/editor-handoff';
@@ -419,7 +420,6 @@
 
 <div class="image-editor-theme min-h-dvh bg-background">
 	<EditorStart
-		kind="image"
 		title={m.editor_start_image_title()}
 		description={m.editor_start_workspace_image_description()}
 	>
@@ -527,10 +527,7 @@
 				</div>
 			</section>
 
-			<details class="mt-4 border-b pb-4">
-				<summary class="min-h-11 cursor-pointer py-3 text-sm font-medium"
-					>{m.image_editor_custom_size()}</summary
-				>
+			<Disclosure class="mt-4" label={m.image_editor_custom_size()}>
 				<section class="pt-3" aria-labelledby="custom-heading">
 					<SectionHeading level={2} size="section" id="custom-heading">
 						{m.image_editor_custom_size()}
@@ -554,7 +551,7 @@
 						</Button>
 					</div>
 				</section>
-			</details>
+			</Disclosure>
 			<section class="mt-8 space-y-7" aria-labelledby="templates-heading">
 				<div class="mb-3">
 					<SectionHeading level={2} size="section" id="templates-heading">

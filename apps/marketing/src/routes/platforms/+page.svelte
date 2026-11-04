@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ArrowUpRight from '@lucide/svelte/icons/arrow-up-right';
 	import PlatformIcon from '$lib/components/platform-icon.svelte';
+	import PostizSocialLogo from '../_components/PostizSocialLogo.svelte';
 	import HeroAccent from '../_components/HeroAccent.svelte';
 	import { platforms } from '../_marketing';
 	import { getChannelStory } from './_stories';
@@ -12,7 +13,7 @@
 
 <section class="channels marketing-shell">
 	<header>
-		<h1>Your business.<br /><HeroAccent>Your channels.</HeroAccent></h1>
+		<h1 class="marketing-title">Your business.<br /><HeroAccent>Your channels.</HeroAccent></h1>
 		<p>
 			A product demo for TikTok. A lesson for LinkedIn. A new arrival for Instagram.<br
 				class="hidden sm:block"
@@ -29,7 +30,12 @@
 				class:blue={index % 3 === 2}
 			>
 				<div class="channel-heading">
-					<PlatformIcon platform={platform.short} class="size-8" /><ArrowUpRight size={22} />
+					{#if platform.slug === 'youtube'}
+						<PostizSocialLogo platform="youtube" />
+					{:else}
+						<PlatformIcon platform={platform.short} class="size-8" />
+					{/if}
+					<ArrowUpRight size={22} />
 				</div>
 				<h2>{platform.name}</h2>
 				<p>{platform.story.title}</p>
@@ -56,10 +62,7 @@
 		margin-bottom: 56px;
 	}
 	h1 {
-		font-size: clamp(42px, 5.7vw, 78px);
-		font-weight: 550;
-		letter-spacing: -0.04em;
-		line-height: 1.06;
+		max-width: none;
 	}
 	header p {
 		margin: 28px auto 0;
@@ -80,6 +83,8 @@
 	}
 	.channel-heading {
 		display: flex;
+		min-height: 48px;
+		align-items: center;
 		justify-content: space-between;
 	}
 	.channel h2 {

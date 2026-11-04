@@ -14,6 +14,7 @@ import { m } from '$lib/paraglide/messages';
 import type { TimelineItem } from '$lib/video-editor/project/types';
 import { createDefaultTracks } from '$lib/video-editor/project/defaults';
 import { timelineStore } from '$lib/video-editor/timeline/stores/timeline-store.svelte';
+import { trimItemToPlayhead } from '$lib/video-editor/timeline/actions/trim-playhead';
 import ClipPropertiesPanel from './clip-properties-panel.svelte';
 import TextTemplateBrowser from './text-template-browser.svelte';
 
@@ -226,7 +227,7 @@ it('opens active corner pin controls by default', async () => {
 	await vi.waitFor(() => {
 		expect(
 			screen.container
-				.querySelector('[data-collapsible-trigger][aria-label="Corner pin: Active"]')
+				.querySelector('[data-collapsible-trigger][aria-label="Corner pin: Modified"]')
 				?.getAttribute('aria-expanded')
 		).toBe('true');
 	});
@@ -304,6 +305,25 @@ it('keeps everyday video controls visible and discloses detailed playback and cr
 		.toBeVisible();
 	await screen.getByRole('button', { name: 'Crop media', exact: true }).click();
 	await expect.element(screen.getByRole('textbox', { name: 'Left', exact: true })).toBeVisible();
+
+	// Audio EQ, effects, ducking, and noise reduction are named section-level disclosures
+	// beside the gain section, ahead of playback; only the fade shape stays under Advanced.
+	for (const name of ['Parametric EQ', 'Audio effects', 'Duck other audio', 'Noise reduction']) {
+		await expect.element(screen.getByRole('button', { name, exact: false })).toBeVisible();
+	}
+	const gain = screen.getByRole('textbox', { name: 'Gain', exact: false }).element();
+	const equalizer = screen.getByRole('button', { name: 'Parametric EQ', exact: false }).element();
+	const noise = screen.getByRole('button', { name: 'Noise reduction', exact: false }).element();
+	const playback = screen.getByRole('button', { name: 'Playback', exact: true }).element();
+	expect(gain.compareDocumentPosition(equalizer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+	expect(noise.compareDocumentPosition(playback) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+	await expect
+		.element(screen.getByRole('checkbox', { name: 'Enable', exact: true }))
+		.not.toBeInTheDocument();
+	await screen.getByRole('button', { name: 'Noise reduction', exact: false }).click();
+	await expect.element(screen.getByRole('checkbox', { name: 'Enable', exact: true })).toBeVisible();
+	await screen.getByRole('button', { name: 'Advanced', exact: true }).click();
+	await expect.element(screen.getByText('Fade shape', { exact: true })).toBeVisible();
 });
 
 it('marks collapsed appearance and crop groups when only keyframes change those properties', async () => {
@@ -322,14 +342,14 @@ it('marks collapsed appearance and crop groups when only keyframes change those 
 	timelineStore._setItems([item]);
 	const screen = await render(ClipPropertiesPanel, { itemId: item.id, onedit: vi.fn() });
 	await expect
-		.element(screen.getByRole('button', { name: 'Appearance: Active', exact: true }))
+		.element(screen.getByRole('button', { name: 'Appearance: Modified', exact: true }))
 		.toHaveAttribute('aria-expanded', 'false');
 	await expect
-		.element(screen.getByRole('button', { name: 'Crop media: Active', exact: true }))
+		.element(screen.getByRole('button', { name: 'Crop media: Modified', exact: true }))
 		.toHaveAttribute('aria-expanded', 'false');
 });
 
-it('retains the surviving source phase when trimming a compound start through Properties', async () => {
+it('retains the surviving source phase when trimming a compound start through the timeline trim action', async () => {
 	const project = createBlankProject('Compound trim source phase');
 	project.metadata = { ...project.metadata, width: 64, height: 64, fps: 30 };
 	const tracks = createDefaultTracks();
@@ -407,9 +427,7 @@ it('retains the surviving source phase when trimming a compound start through Pr
 	const root = await navigator.storage.getDirectory();
 	const dir = `compound-trim-${crypto.randomUUID()}`;
 	try {
-		const trim = screen.getByRole('button', { name: 'Trim start to playhead', exact: true });
-		await trim.element().focus();
-		await userEvent.keyboard('{Enter}');
+		expect(trimItemToPlayhead('wrapper', 'start')).toBe(true);
 		await expectSurvivingBlue();
 		expect(timelineStore.itemById.get('wrapper')).toMatchObject({
 			from: 30,

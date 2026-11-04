@@ -28,7 +28,7 @@
 	import type { TimelineSnapshot } from '$lib/video-editor/timeline/commands/types';
 	import { autoKeyframeStore } from '$lib/video-editor/timeline/stores/auto-keyframe-store.svelte';
 	import { timelineStore } from '$lib/video-editor/timeline/stores/timeline-store.svelte';
-	import ScrubbableNumberInput from '$lib/components/editor-scrubbable-number-input.svelte';
+	import { ScrubField } from '$lib/components/editor-density';
 
 	let { audioItems, onedit }: { audioItems: TimelineItem[]; onedit: () => void } = $props();
 
@@ -203,7 +203,7 @@
 		<span class="text-[10px] font-medium text-[var(--video-editor-muted)]">{label}</span>
 		<div class="flex min-w-0 items-center gap-1">
 			<Slider
-				class="h-[22px] min-w-8 flex-1 [&_[data-slot=slider-thumb]]:shadow-none"
+				class="h-[var(--editor-22,22px)] min-w-8 flex-1 [&_[data-slot=slider-thumb]]:shadow-none"
 				{min}
 				{max}
 				{step}
@@ -219,19 +219,21 @@
 				onKeydown={(event) => event.stopPropagation()}
 			/>
 			<div class="relative w-[4.8rem] shrink-0">
-				<ScrubbableNumberInput
+				<ScrubField
 					ariaLabel={label}
 					{value}
 					placeholder={m.video_editor_property_mixed()}
 					{min}
 					{max}
 					{step}
-					{decimals}
-					class="h-[22px] w-full rounded border border-[var(--video-editor-border)] bg-[var(--video-editor-control)] py-1 pr-6 pl-1.5 text-right text-[11px] tabular-nums outline-none"
+					precision={decimals}
+					valueWidth="100%"
+					class="h-[var(--editor-22,22px)] rounded border border-[var(--video-editor-border)] bg-[var(--video-editor-control)] py-1 pr-6 pl-1.5 text-right text-[11px] tabular-nums outline-none"
 					onbegin={() => beginGesture(property)}
-					onlive={(next) => (property === 'volume' ? writeGain(next) : writeStatic(property, next))}
-					oncommit={(next) => commit(property, next)}
-					oncancel={cancelGesture}
+					onValueChange={(next) =>
+						property === 'volume' ? writeGain(next) : writeStatic(property, next)}
+					onValueCommit={(next) => commit(property, next)}
+					onValueCancel={cancelGesture}
 				/>
 				<span
 					class="pointer-events-none absolute top-1/2 right-1.5 -translate-y-1/2 text-[9px] text-[var(--video-editor-muted)]"
@@ -255,11 +257,9 @@
 
 {#if audioItems.length > 0}
 	<div class="flex flex-col gap-2" data-testid="clip-audio-core-section">
-		<section
-			class="overflow-hidden rounded-md border border-[var(--video-editor-border)] bg-[var(--video-editor-panel)]"
-		>
+		<section class="border-t border-[var(--video-editor-border)]">
 			<h3
-				class="flex h-[25px] items-center gap-2 border-b border-[var(--video-editor-border)] px-2.5 text-[10px] font-semibold tracking-wider text-[var(--video-editor-muted)] uppercase"
+				class="flex h-[25px] items-center gap-2 border-b border-[var(--video-editor-border)] px-2.5 text-xs font-medium text-[var(--video-editor-muted)]"
 			>
 				<ThemeIcon role="audio" class="size-3.5 text-[var(--video-editor-muted)]" />
 				{m.video_editor_property_audio()}
@@ -297,9 +297,7 @@
 				)}
 			</div>
 		</section>
-		<section
-			class="overflow-hidden rounded-md border border-[var(--video-editor-border)] bg-[var(--video-editor-panel)]"
-		>
+		<section class="border-t border-[var(--video-editor-border)]">
 			<EditorDisclosure label={m.video_editor_audio_pitch()}>
 				<div class="divide-y divide-[var(--video-editor-border)]">
 					{@render control(

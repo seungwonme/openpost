@@ -4,7 +4,7 @@
 	import { defaultTextCurve } from '../effects';
 	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
-	import { Slider } from '$lib/components/ui/slider';
+	import { SliderRow } from '$lib/components/editor-density';
 	import AppSelect from '$lib/components/app-select.svelte';
 	import * as Collapsible from '$lib/components/ui/collapsible';
 	import * as Tooltip from '$lib/components/ui/tooltip';
@@ -156,6 +156,11 @@
 		editor.updateTransform(layer.id, { [key]: value });
 	}
 
+	function updateSelectedOpacityPercent(percent: number): void {
+		const result = editor.updateSelectedOpacity(percent / 100);
+		applicationFeedback = partialApplicationMessage(result);
+	}
+
 	function updateCrop(key: 'x' | 'y' | 'width' | 'height', event: Event, fallback: number): void {
 		if (!layer?.image) return;
 		const value = numberValue(event, fallback * 100) / 100;
@@ -197,6 +202,38 @@
 				Math.min(editor.activePageDimensions.height - nextHeight, centerY - nextHeight / 2)
 			);
 		});
+	}
+
+	function updateCurveStrength(percent: number): void {
+		const text = layer?.text;
+		const curve = text?.curve;
+		if (!layer || !text || !curve) return;
+		editor.updateLayer(
+			layer.id,
+			{
+				text: {
+					...text,
+					curve: { ...curve, strength: percent / 100 }
+				}
+			},
+			`text-curve-strength:${layer.id}`
+		);
+	}
+
+	function updateCurveOffset(percent: number): void {
+		const text = layer?.text;
+		const curve = text?.curve;
+		if (!layer || !text || !curve) return;
+		editor.updateLayer(
+			layer.id,
+			{
+				text: {
+					...text,
+					curve: { ...curve, offset: percent / 100 }
+				}
+			},
+			`text-curve-offset:${layer.id}`
+		);
 	}
 
 	type AdjustmentControl = readonly [
@@ -304,335 +341,7 @@
 					</p>
 				{/if}
 				{#if layer.type === 'text' && layer.text}
-					<TextContentProperties />
-				{/if}
-				<Collapsible.Root bind:open={layerActionsOpen} class="border-t pt-2">
-					<Collapsible.Trigger>
-						{#snippet child({ props })}
-							<button
-								{...props}
-								type="button"
-								class="flex min-h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs font-semibold hover:bg-muted"
-							>
-								<span class="min-w-0 flex-1">{m.image_editor_layer()}</span>
-								<span class="max-w-32 truncate text-[11px] font-normal text-muted-foreground">
-									{layer.name}
-								</span>
-								<ThemeIcon
-									role="chevron-down"
-									class={`size-3.5 transition-transform ${layerActionsOpen ? 'rotate-180' : ''}`}
-								/>
-							</button>
-						{/snippet}
-					</Collapsible.Trigger>
-					<Collapsible.Content class="space-y-2 pt-2">
-						<label for="layer-name" class="block text-xs font-medium"
-							>{m.image_editor_layer_name()}</label
-						>
-						<Input
-							id="layer-name"
-							value={layer.name}
-							disabled={!editor.canEdit}
-							oninput={(event) => {
-								const name = event.currentTarget.value;
-								if (name.trim()) editor.updateLayer(layer.id, { name }, `layer-name:${layer.id}`);
-							}}
-							onblur={(event) => {
-								const name = event.currentTarget.value.trim();
-								if (!name) event.currentTarget.value = layer.name;
-								else if (name !== layer.name)
-									editor.updateLayer(layer.id, { name }, `layer-name:${layer.id}`);
-							}}
-							onkeydown={(event) => {
-								if (event.key === 'Enter') event.currentTarget.blur();
-							}}
-						/>
-						<div class="grid grid-cols-2 gap-2">
-							<Button variant="outline" size="sm" onclick={() => align('horizontal')}
-								>{m.image_editor_center_x()}</Button
-							>
-							<Button variant="outline" size="sm" onclick={() => align('vertical')}
-								>{m.image_editor_center_y()}</Button
-							>
-						</div>
-						<div class="grid grid-cols-4 gap-1">
-							<Tooltip.Root>
-								<Tooltip.Trigger>
-									{#snippet child({ props })}
-										<Button
-											{...props}
-											variant="outline"
-											size="icon-sm"
-											onclick={() => editor.reorderLayer(layer.id, 'front')}
-											aria-label={m.image_editor_bring_front()}
-											><ProtectedIcon icon="editor-arrange-front" /></Button
-										>
-									{/snippet}
-								</Tooltip.Trigger>
-								<Tooltip.Content>{m.image_editor_bring_front()}</Tooltip.Content>
-							</Tooltip.Root>
-							<Tooltip.Root>
-								<Tooltip.Trigger>
-									{#snippet child({ props })}
-										<Button
-											{...props}
-											variant="outline"
-											size="icon-sm"
-											onclick={() => editor.reorderLayer(layer.id, 'back')}
-											aria-label={m.image_editor_send_back()}
-											><ProtectedIcon icon="editor-arrange-back" /></Button
-										>
-									{/snippet}
-								</Tooltip.Trigger>
-								<Tooltip.Content>{m.image_editor_send_back()}</Tooltip.Content>
-							</Tooltip.Root>
-							<Tooltip.Root>
-								<Tooltip.Trigger>
-									{#snippet child({ props })}
-										<Button
-											{...props}
-											variant="outline"
-											size="icon-sm"
-											onclick={() => editor.duplicateSelected()}
-											aria-label={m.image_editor_duplicate()}><ThemeIcon role="copy" /></Button
-										>
-									{/snippet}
-								</Tooltip.Trigger>
-								<Tooltip.Content>{m.image_editor_duplicate()}</Tooltip.Content>
-							</Tooltip.Root>
-							<Tooltip.Root>
-								<Tooltip.Trigger>
-									{#snippet child({ props })}
-										<Button
-											{...props}
-											variant="destructive"
-											size="icon-sm"
-											disabled={selectionLocked}
-											onclick={() => editor.deleteSelected()}
-											aria-label={m.image_editor_delete_layer()}><ThemeIcon role="delete" /></Button
-										>
-									{/snippet}
-								</Tooltip.Trigger>
-								<Tooltip.Content>{m.image_editor_delete_layer()}</Tooltip.Content>
-							</Tooltip.Root>
-						</div>
-					</Collapsible.Content>
-				</Collapsible.Root>
-
-				<Collapsible.Root bind:open={transformOpen} class="border-t pt-2">
-					<Collapsible.Trigger>
-						{#snippet child({ props })}
-							<button
-								{...props}
-								type="button"
-								class="flex min-h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs font-semibold hover:bg-muted"
-							>
-								<span class="min-w-0 flex-1">{m.image_editor_transform()}</span>
-								{#if selectedTransform}
-									<span class="shrink-0 text-[11px] font-normal text-muted-foreground tabular-nums">
-										{Math.round(selectedTransform.width)}×{Math.round(selectedTransform.height)}
-									</span>
-								{/if}
-								<ThemeIcon
-									role="chevron-down"
-									class={`size-3.5 transition-transform ${transformOpen ? 'rotate-180' : ''}`}
-								/>
-							</button>
-						{/snippet}
-					</Collapsible.Trigger>
-					<Collapsible.Content class="space-y-2 pt-2">
-						{#if editor.selectedLayers.length > 1}
-							<div class="space-y-1.5 rounded-md border bg-muted/20 p-2">
-								<p class="text-xs font-medium">
-									{m.image_editor_transform_layers()}
-								</p>
-								<div class="grid grid-cols-3 gap-1">
-									<Button
-										variant="outline"
-										size="xs"
-										disabled={anySelectionLocked}
-										onclick={() => editor.alignSelected('left')}
-										>{m.image_editor_align_left()}</Button
-									>
-									<Button
-										variant="outline"
-										size="xs"
-										disabled={anySelectionLocked}
-										onclick={() => editor.alignSelected('center_x')}
-										>{m.image_editor_align_center()}</Button
-									>
-									<Button
-										variant="outline"
-										size="xs"
-										disabled={anySelectionLocked}
-										onclick={() => editor.alignSelected('right')}
-										>{m.image_editor_align_right()}</Button
-									>
-									<Button
-										variant="outline"
-										size="xs"
-										disabled={anySelectionLocked}
-										onclick={() => editor.alignSelected('top')}>{m.image_editor_align_top()}</Button
-									>
-									<Button
-										variant="outline"
-										size="xs"
-										disabled={anySelectionLocked}
-										onclick={() => editor.alignSelected('center_y')}
-										>{m.image_editor_align_middle()}</Button
-									>
-									<Button
-										variant="outline"
-										size="xs"
-										disabled={anySelectionLocked}
-										onclick={() => editor.alignSelected('bottom')}
-										>{m.image_editor_align_bottom()}</Button
-									>
-								</div>
-								{#if editor.selectedLayers.length > 2}
-									<div class="grid grid-cols-2 gap-1">
-										<Button
-											variant="outline"
-											size="xs"
-											disabled={anySelectionLocked}
-											onclick={() => editor.distributeSelected('horizontal')}
-											>{m.image_editor_distribute_x()}</Button
-										>
-										<Button
-											variant="outline"
-											size="xs"
-											disabled={anySelectionLocked}
-											onclick={() => editor.distributeSelected('vertical')}
-											>{m.image_editor_distribute_y()}</Button
-										>
-									</div>
-								{/if}
-							</div>
-						{/if}
-						<div class="grid grid-cols-2 gap-2">
-							{#each [['X', 'x'], ['Y', 'y'], ['W', 'width'], ['H', 'height']] as [label, key] (key)}
-								<label class="grid grid-cols-[1.5rem_1fr] items-center">
-									<span class="text-xs text-muted-foreground">{label}</span>
-									<Input
-										type="number"
-										min={key === 'width' || key === 'height' ? 1 : undefined}
-										value={Math.round(
-											selectedTransform?.[key as 'x' | 'y' | 'width' | 'height'] ?? 0
-										)}
-										disabled={!editor.canEdit || selectionLocked}
-										oninput={(event) =>
-											updateNumericTransform(key as 'x' | 'y' | 'width' | 'height', event)}
-									/>
-								</label>
-							{/each}
-						</div>
-						<Button
-							variant={aspectLocked ? 'secondary' : 'ghost'}
-							size="xs"
-							aria-pressed={aspectLocked}
-							onclick={() => (aspectLocked = !aspectLocked)}
-						>
-							{#if aspectLocked}<ThemeIcon role="link" />{:else}<ThemeIcon role="unlink" />{/if}
-							{m.image_editor_lock_aspect_ratio()}
-						</Button>
-						<div class="space-y-1">
-							<div class="flex items-center justify-between gap-2">
-								<span class="text-xs">{m.image_editor_rotation()}</span>
-								<div class="flex items-center gap-1">
-									<Input
-										type="number"
-										min="-180"
-										max="180"
-										value={Math.round(selectedTransform?.rotation ?? 0)}
-										class="h-7 w-16 px-1.5 text-right text-xs"
-										disabled={!editor.canEdit || selectionLocked}
-										oninput={(event) =>
-											updateSelectedTransform(
-												'rotation',
-												numberValue(event, selectedTransform?.rotation ?? 0)
-											)}
-									/>
-									<Button
-										variant="ghost"
-										size="icon-xs"
-										onclick={() => updateSelectedTransform('rotation', 0)}
-										disabled={!editor.canEdit || selectionLocked}
-										aria-label={m.image_editor_reset_rotation()}
-										title={m.image_editor_reset_rotation()}
-									>
-										<ProtectedIcon icon="editor-rotate-left" />
-									</Button>
-								</div>
-							</div>
-							<Slider
-								value={selectedTransform?.rotation ?? 0}
-								min={-180}
-								max={180}
-								step={1}
-								disabled={!editor.canEdit || selectionLocked}
-								ariaLabel={m.image_editor_rotation()}
-								onValueChange={(rotation) => updateSelectedTransform('rotation', rotation)}
-							/>
-						</div>
-						<div class="grid grid-cols-2 gap-2">
-							<Button
-								variant={selectedTransform?.flip_x ? 'secondary' : 'outline'}
-								size="sm"
-								onclick={() =>
-									updateSelectedTransform('flip_x', !(selectedTransform?.flip_x ?? false))}
-							>
-								<ProtectedIcon icon="editor-flip-horizontal" />
-								{m.image_editor_flip_x()}
-							</Button>
-							<Button
-								variant={selectedTransform?.flip_y ? 'secondary' : 'outline'}
-								size="sm"
-								onclick={() =>
-									updateSelectedTransform('flip_y', !(selectedTransform?.flip_y ?? false))}
-							>
-								<ProtectedIcon icon="editor-flip-vertical" />
-								{m.image_editor_flip_y()}
-							</Button>
-						</div>
-						<label class="grid gap-1 text-xs">
-							<span>
-								{mixedOpacity.mixed
-									? m.image_editor_opacity_mixed()
-									: m.image_editor_opacity({
-											value: Math.round(layer.opacity * 100)
-										})}
-							</span>
-							<Slider
-								min={0}
-								max={1}
-								step={0.01}
-								value={layer.opacity}
-								disabled={!editor.canEdit || selectionLocked}
-								ariaLabel={m.image_editor_opacity({
-									value: Math.round(layer.opacity * 100)
-								})}
-								onValueChange={(opacity) => {
-									const result = editor.updateSelectedOpacity(opacity);
-									applicationFeedback = partialApplicationMessage(result);
-								}}
-							/>
-						</label>
-					</Collapsible.Content>
-				</Collapsible.Root>
-
-				{#if layer.type !== 'group'}
-					{#key layer.id}<LayerEffectsPanel {layer} />{/key}
-				{/if}
-				{#if layer.image}
-					<LensEffectProperties {layer} />
-					{#key layer.id}<AnimationProperties {layer} />{/key}
-				{/if}
-
-				{#if layer.type === 'text' && layer.text}
-					<section class="space-y-2 border-t pt-4">
-						<h3 class="text-xs font-medium text-muted-foreground">
-							{m.image_editor_format()}
-						</h3>
+					<TextContentProperties>
 						<div class="grid grid-cols-2 gap-2">
 							<label class="grid gap-1 text-xs">
 								<span>{m.image_editor_style()}</span>
@@ -772,59 +481,29 @@
 							</label>
 							{#if layer.text.curve && layer.text.curve.type !== 'none'}
 								{#if ['arc_up', 'arc_down', 'wave'].includes(layer.text.curve.type)}
-									<label class="grid gap-1 text-xs">
-										<span
-											>{m.image_editor_curve_strength()} · {Math.round(
-												layer.text.curve.strength * 100
-											)}%</span
-										>
-										<Slider
-											value={layer.text.curve.strength}
-											min={0.05}
-											max={1}
-											step={0.01}
-											disabled={!editor.canEdit || layerLocked}
-											ariaLabel={m.image_editor_curve_strength()}
-											onValueChange={(strength) =>
-												editor.updateLayer(
-													layer.id,
-													{
-														text: {
-															...layer.text!,
-															curve: { ...layer.text!.curve!, strength }
-														}
-													},
-													`text-curve-strength:${layer.id}`
-												)}
-										/>
-									</label>
-								{/if}
-								<label class="grid gap-1 text-xs">
-									<span
-										>{m.image_editor_curve_offset()} · {Math.round(
-											layer.text.curve.offset * 100
-										)}%</span
-									>
-									<Slider
-										value={layer.text.curve.offset}
-										min={-1}
-										max={1}
-										step={0.01}
+									<SliderRow
+										label={m.image_editor_curve_strength()}
+										value={layer.text.curve.strength * 100}
+										min={5}
+										max={100}
+										step={1}
+										precision={0}
 										disabled={!editor.canEdit || layerLocked}
-										ariaLabel={m.image_editor_curve_offset()}
-										onValueChange={(offset) =>
-											editor.updateLayer(
-												layer.id,
-												{
-													text: {
-														...layer.text!,
-														curve: { ...layer.text!.curve!, offset }
-													}
-												},
-												`text-curve-offset:${layer.id}`
-											)}
+										onValueChange={updateCurveStrength}
+										onValueCommit={updateCurveStrength}
 									/>
-								</label>
+								{/if}
+								<SliderRow
+									label={m.image_editor_curve_offset()}
+									value={layer.text.curve.offset * 100}
+									min={-100}
+									max={100}
+									step={1}
+									precision={0}
+									disabled={!editor.canEdit || layerLocked}
+									onValueChange={updateCurveOffset}
+									onValueCommit={updateCurveOffset}
+								/>
 								<Button
 									variant={layer.text.curve.reverse ? 'secondary' : 'outline'}
 									size="xs"
@@ -913,7 +592,303 @@
 									}
 								})}>{m.image_editor_clear_text_effects()}</Button
 						>
-					</section>
+					</TextContentProperties>
+				{/if}
+				<Collapsible.Root bind:open={transformOpen} class="border-t pt-2">
+					<Collapsible.Trigger>
+						{#snippet child({ props })}
+							<button
+								{...props}
+								type="button"
+								class="flex min-h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs font-semibold hover:bg-muted"
+							>
+								<span class="min-w-0 flex-1">{m.image_editor_transform()}</span>
+								{#if selectedTransform}
+									<span class="shrink-0 text-[11px] font-normal text-muted-foreground tabular-nums">
+										{Math.round(selectedTransform.width)}×{Math.round(selectedTransform.height)}
+									</span>
+								{/if}
+								<ThemeIcon
+									role="chevron-down"
+									class={`size-3.5 transition-transform ${transformOpen ? 'rotate-180' : ''}`}
+								/>
+							</button>
+						{/snippet}
+					</Collapsible.Trigger>
+					<Collapsible.Content class="space-y-2 pt-2">
+						{#if editor.selectedLayers.length > 1}
+							<div class="space-y-1.5 rounded-md border bg-muted/20 p-2">
+								<p class="text-xs font-medium">
+									{m.image_editor_transform_layers()}
+								</p>
+								<div class="grid grid-cols-3 gap-1">
+									<Button
+										variant="outline"
+										size="xs"
+										disabled={anySelectionLocked}
+										onclick={() => editor.alignSelected('left')}
+										>{m.image_editor_align_left()}</Button
+									>
+									<Button
+										variant="outline"
+										size="xs"
+										disabled={anySelectionLocked}
+										onclick={() => editor.alignSelected('center_x')}
+										>{m.image_editor_align_center()}</Button
+									>
+									<Button
+										variant="outline"
+										size="xs"
+										disabled={anySelectionLocked}
+										onclick={() => editor.alignSelected('right')}
+										>{m.image_editor_align_right()}</Button
+									>
+									<Button
+										variant="outline"
+										size="xs"
+										disabled={anySelectionLocked}
+										onclick={() => editor.alignSelected('top')}>{m.image_editor_align_top()}</Button
+									>
+									<Button
+										variant="outline"
+										size="xs"
+										disabled={anySelectionLocked}
+										onclick={() => editor.alignSelected('center_y')}
+										>{m.image_editor_align_middle()}</Button
+									>
+									<Button
+										variant="outline"
+										size="xs"
+										disabled={anySelectionLocked}
+										onclick={() => editor.alignSelected('bottom')}
+										>{m.image_editor_align_bottom()}</Button
+									>
+								</div>
+								{#if editor.selectedLayers.length > 2}
+									<div class="grid grid-cols-2 gap-1">
+										<Button
+											variant="outline"
+											size="xs"
+											disabled={anySelectionLocked}
+											onclick={() => editor.distributeSelected('horizontal')}
+											>{m.image_editor_distribute_x()}</Button
+										>
+										<Button
+											variant="outline"
+											size="xs"
+											disabled={anySelectionLocked}
+											onclick={() => editor.distributeSelected('vertical')}
+											>{m.image_editor_distribute_y()}</Button
+										>
+									</div>
+								{/if}
+							</div>
+						{/if}
+						<div class="grid grid-cols-2 gap-2">
+							{#each [['X', 'x'], ['Y', 'y'], ['W', 'width'], ['H', 'height']] as [label, key] (key)}
+								<label class="grid grid-cols-[1.5rem_1fr] items-center">
+									<span class="text-xs text-muted-foreground">{label}</span>
+									<Input
+										type="number"
+										min={key === 'width' || key === 'height' ? 1 : undefined}
+										value={Math.round(
+											selectedTransform?.[key as 'x' | 'y' | 'width' | 'height'] ?? 0
+										)}
+										disabled={!editor.canEdit || selectionLocked}
+										oninput={(event) =>
+											updateNumericTransform(key as 'x' | 'y' | 'width' | 'height', event)}
+									/>
+								</label>
+							{/each}
+						</div>
+						<Button
+							variant={aspectLocked ? 'secondary' : 'ghost'}
+							size="xs"
+							aria-pressed={aspectLocked}
+							onclick={() => (aspectLocked = !aspectLocked)}
+						>
+							{#if aspectLocked}<ThemeIcon role="link" />{:else}<ThemeIcon role="unlink" />{/if}
+							{m.image_editor_lock_aspect_ratio()}
+						</Button>
+						<div class="flex items-center gap-1">
+							<div class="min-w-0 flex-1">
+								<SliderRow
+									label={m.image_editor_rotation()}
+									value={selectedTransform?.rotation ?? 0}
+									min={-180}
+									max={180}
+									step={1}
+									precision={0}
+									disabled={!editor.canEdit || selectionLocked}
+									onValueChange={(rotation) => updateSelectedTransform('rotation', rotation)}
+									onValueCommit={(rotation) => updateSelectedTransform('rotation', rotation)}
+								/>
+							</div>
+							<Button
+								variant="ghost"
+								size="icon-xs"
+								onclick={() => updateSelectedTransform('rotation', 0)}
+								disabled={!editor.canEdit || selectionLocked}
+								aria-label={m.image_editor_reset_rotation()}
+								title={m.image_editor_reset_rotation()}
+							>
+								<ProtectedIcon icon="editor-rotate-left" />
+							</Button>
+						</div>
+						<div class="grid grid-cols-2 gap-2">
+							<Button
+								variant={selectedTransform?.flip_x ? 'secondary' : 'outline'}
+								size="sm"
+								onclick={() =>
+									updateSelectedTransform('flip_x', !(selectedTransform?.flip_x ?? false))}
+							>
+								<ProtectedIcon icon="editor-flip-horizontal" />
+								{m.image_editor_flip_x()}
+							</Button>
+							<Button
+								variant={selectedTransform?.flip_y ? 'secondary' : 'outline'}
+								size="sm"
+								onclick={() =>
+									updateSelectedTransform('flip_y', !(selectedTransform?.flip_y ?? false))}
+							>
+								<ProtectedIcon icon="editor-flip-vertical" />
+								{m.image_editor_flip_y()}
+							</Button>
+						</div>
+						<SliderRow
+							label={mixedOpacity.mixed
+								? m.image_editor_opacity_mixed()
+								: m.image_editor_opacity({ value: Math.round(layer.opacity * 100) })}
+							value={layer.opacity * 100}
+							min={0}
+							max={100}
+							step={1}
+							precision={0}
+							disabled={!editor.canEdit || selectionLocked}
+							onValueChange={updateSelectedOpacityPercent}
+							onValueCommit={updateSelectedOpacityPercent}
+						/>
+					</Collapsible.Content>
+				</Collapsible.Root>
+				<Collapsible.Root bind:open={layerActionsOpen} class="border-t pt-2">
+					<Collapsible.Trigger>
+						{#snippet child({ props })}
+							<button
+								{...props}
+								type="button"
+								class="flex min-h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs font-semibold hover:bg-muted"
+							>
+								<span class="min-w-0 flex-1">{m.image_editor_layer()}</span>
+								<span class="max-w-32 truncate text-[11px] font-normal text-muted-foreground">
+									{layer.name}
+								</span>
+								<ThemeIcon
+									role="chevron-down"
+									class={`size-3.5 transition-transform ${layerActionsOpen ? 'rotate-180' : ''}`}
+								/>
+							</button>
+						{/snippet}
+					</Collapsible.Trigger>
+					<Collapsible.Content class="space-y-2 pt-2">
+						<label for="layer-name" class="block text-xs font-medium"
+							>{m.image_editor_layer_name()}</label
+						>
+						<Input
+							id="layer-name"
+							value={layer.name}
+							disabled={!editor.canEdit}
+							oninput={(event) => {
+								const name = event.currentTarget.value;
+								if (name.trim()) editor.updateLayer(layer.id, { name }, `layer-name:${layer.id}`);
+							}}
+							onblur={(event) => {
+								const name = event.currentTarget.value.trim();
+								if (!name) event.currentTarget.value = layer.name;
+								else if (name !== layer.name)
+									editor.updateLayer(layer.id, { name }, `layer-name:${layer.id}`);
+							}}
+							onkeydown={(event) => {
+								if (event.key === 'Enter') event.currentTarget.blur();
+							}}
+						/>
+						<div class="grid grid-cols-2 gap-2">
+							<Button variant="outline" size="sm" onclick={() => align('horizontal')}
+								>{m.image_editor_center_x()}</Button
+							>
+							<Button variant="outline" size="sm" onclick={() => align('vertical')}
+								>{m.image_editor_center_y()}</Button
+							>
+						</div>
+						<div class="grid grid-cols-4 gap-1">
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									{#snippet child({ props })}
+										<Button
+											{...props}
+											variant="outline"
+											size="icon-sm"
+											onclick={() => editor.reorderLayer(layer.id, 'front')}
+											aria-label={m.image_editor_bring_front()}
+											><ProtectedIcon icon="editor-arrange-front" /></Button
+										>
+									{/snippet}
+								</Tooltip.Trigger>
+								<Tooltip.Content>{m.image_editor_bring_front()}</Tooltip.Content>
+							</Tooltip.Root>
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									{#snippet child({ props })}
+										<Button
+											{...props}
+											variant="outline"
+											size="icon-sm"
+											onclick={() => editor.reorderLayer(layer.id, 'back')}
+											aria-label={m.image_editor_send_back()}
+											><ProtectedIcon icon="editor-arrange-back" /></Button
+										>
+									{/snippet}
+								</Tooltip.Trigger>
+								<Tooltip.Content>{m.image_editor_send_back()}</Tooltip.Content>
+							</Tooltip.Root>
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									{#snippet child({ props })}
+										<Button
+											{...props}
+											variant="outline"
+											size="icon-sm"
+											onclick={() => editor.duplicateSelected()}
+											aria-label={m.image_editor_duplicate()}><ThemeIcon role="copy" /></Button
+										>
+									{/snippet}
+								</Tooltip.Trigger>
+								<Tooltip.Content>{m.image_editor_duplicate()}</Tooltip.Content>
+							</Tooltip.Root>
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									{#snippet child({ props })}
+										<Button
+											{...props}
+											variant="destructive"
+											size="icon-sm"
+											disabled={selectionLocked}
+											onclick={() => editor.deleteSelected()}
+											aria-label={m.image_editor_delete_layer()}><ThemeIcon role="delete" /></Button
+										>
+									{/snippet}
+								</Tooltip.Trigger>
+								<Tooltip.Content>{m.image_editor_delete_layer()}</Tooltip.Content>
+							</Tooltip.Root>
+						</div>
+					</Collapsible.Content>
+				</Collapsible.Root>
+
+				{#if layer.type !== 'group'}
+					{#key layer.id}<LayerEffectsPanel {layer} />{/key}
+				{/if}
+				{#if layer.image}
+					<LensEffectProperties {layer} />
+					{#key layer.id}<AnimationProperties {layer} />{/key}
 				{/if}
 
 				{#if layer.type === 'shape' && layer.shape}
@@ -1213,23 +1188,17 @@
 									<div class="space-y-3 not-first:border-t not-first:pt-3">
 										<h4 class="text-xs font-medium">{group.label}</h4>
 										{#each group.controls as [label, key, min, max] (key)}
-											<label class="grid gap-1 text-xs">
-												<span class="flex items-center justify-between gap-2">
-													<span>{label}</span>
-													<span class="text-muted-foreground tabular-nums">
-														{Math.round(layer.image.adjustments[key] * 100)}
-													</span>
-												</span>
-												<Slider
-													{min}
-													{max}
-													step={0.01}
-													value={layer.image.adjustments[key]}
-													disabled={!editor.canEdit || layerLocked}
-													ariaLabel={label}
-													onValueChange={(value) => setAdjustment(key, value)}
-												/>
-											</label>
+											<SliderRow
+												{label}
+												value={layer.image.adjustments[key] * 100}
+												min={min * 100}
+												max={max * 100}
+												step={1}
+												precision={0}
+												disabled={!editor.canEdit || layerLocked}
+												onValueChange={(value) => setAdjustment(key, value / 100)}
+												onValueCommit={(value) => setAdjustment(key, value / 100)}
+											/>
 										{/each}
 									</div>
 								{/each}

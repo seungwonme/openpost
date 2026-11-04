@@ -412,7 +412,7 @@
 								<div class="mt-2 flex flex-wrap items-center gap-2">
 									<span
 										class={[
-											'rounded-sm px-1.5 py-0.5 text-[11px] font-medium capitalize',
+											'rounded-sm px-1.5 py-0.5 text-xs font-medium capitalize',
 											getStatusColor(post.status)
 										]}>{statusLabel(post.status)}</span
 									>
@@ -434,18 +434,24 @@
 														) ||
 															account.slug)) ||
 													destination.platform}
-												<span title={destinationName} class="shrink-0">
+												<span
+													title={destinationName}
+													class="inline-flex shrink-0 items-center gap-1"
+												>
 													<SocialAccountAvatar
 														name={destinationName}
 														platform={destination.platform}
 														avatarUrl={account?.account_avatar_url ?? ''}
 														size="sm"
 													/>
+													{#if destination.platform === 'youtube'}
+														<span class="text-xs text-muted-foreground">YouTube</span>
+													{/if}
 												</span>
 											{/each}
 											{#if hiddenDestinationCount > 0}
 												<span
-													class="flex size-6 items-center justify-center rounded-full border border-border bg-muted text-[10px] font-medium text-muted-foreground ring-2 ring-background"
+													class="flex size-6 items-center justify-center rounded-full border border-border bg-muted text-xs font-medium text-muted-foreground ring-2 ring-background"
 												>
 													+{hiddenDestinationCount}
 												</span>
