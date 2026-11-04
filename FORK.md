@@ -40,7 +40,7 @@ and checks the database before the new image starts. Roll back with `--restore <
 restores the data and the image it recorded. Do not schedule the script with launchd or cron. The
 runbook is `apps/docs/content/docs/self-hosting/macbook-macmini.mdx`.
 
-The overlay pins the Compose project name `openpost` and the volume `openpost_openpost_data`, so the
+The overlay pins the Compose project name `openpost` and the external volume `openpost_openpost_data`, so the
 checkout can move or be renamed without starting on an empty volume.
 
 ## Fork-only paths

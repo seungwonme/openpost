@@ -15,7 +15,10 @@ services:
       - aiden-edge
 
 volumes:
+  # Created outside Compose. External means Compose never creates an empty replacement
+  # and `docker compose down -v` cannot remove it.
   openpost_data:
+    external: true
     name: openpost_openpost_data
 
 networks:

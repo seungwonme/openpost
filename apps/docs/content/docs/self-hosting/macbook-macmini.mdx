@@ -191,7 +191,7 @@ The MacBook instance is stopped. Do not run a second worker against the same wor
 - Branch: `main` (`--build` fast-forwards it to `origin/main`)
 - Base Compose file: `docker-compose.yml` (the portable default for ordinary local users)
 - Mac mini deployment file: `docker-compose.macmini.yml` (the Mac mini-specific override; pins the Compose project `openpost`)
-- Persistent volume: `openpost_openpost_data` (named explicitly, so moving the checkout keeps the data)
+- Persistent volume: `openpost_openpost_data` (external and named explicitly, so moving the checkout keeps the data)
 - Runtime image: `DEPLOY_IMAGE` in the private `.env`, written by `scripts/fork/macmini-deploy.sh`
 - Backups: `/Users/aiden/Backups/openpost/<timestamp>/`, one per deployment
 - OpenPost host port: `127.0.0.1:18081`
