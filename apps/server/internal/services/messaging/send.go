@@ -181,7 +181,7 @@ func (s *Service) sendMessage(ctx context.Context, messageID string) error {
 		Where("id = ? AND workspace_id = ?", message.ConversationID, message.WorkspaceID).Scan(ctx); err != nil {
 		return err
 	}
-	if hold, err := s.sendAutomationHold(ctx, message, conversation); err != nil || hold {
+	if hold, err := s.prepareAutomatedSend(ctx, message, conversation); err != nil || hold {
 		return err
 	}
 	var account models.SocialAccount

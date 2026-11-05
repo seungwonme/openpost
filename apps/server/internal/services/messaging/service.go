@@ -56,7 +56,7 @@ type Service struct {
 	receiptDrainer        func(context.Context) error
 	now                   func() time.Time
 	featureGate           FeatureGate
-	automationRunStopper  func(context.Context, bun.Tx, string, []string, string) error
+	automationRunStopper  func(context.Context, bun.Tx, string, string, []string, string) error
 }
 
 func NewService(db *bun.DB, tokens TokenSource, notificationService *notifications.Service) *Service {

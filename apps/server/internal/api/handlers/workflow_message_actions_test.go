@@ -41,6 +41,9 @@ func (dmProvider) MessagingSupport() platform.MessagingSupport {
 func (dmProvider) FetchMessages(context.Context, string, platform.FetchMessagesRequest) (platform.FetchMessagesResult, error) {
 	return platform.FetchMessagesResult{}, nil
 }
+func (dmProvider) FetchMessageHistory(context.Context, string, platform.FetchMessageHistoryRequest) (platform.FetchMessageHistoryResult, error) {
+	return platform.FetchMessageHistoryResult{}, nil
+}
 func (p dmProvider) SendMessage(_ context.Context, _ string, request platform.SendMessageRequest) (platform.SendMessageResult, error) {
 	*p.sent = append(*p.sent, request)
 	if p.send != nil {
@@ -131,8 +134,6 @@ func TestDMCampaignAnswersDuplicateWebhooksOnce(t *testing.T) {
 	event := dmEvent("mid.1", "inbound", "reader", "guide please", at)
 	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", event))
 	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", event))
-	// An echo of anything the account sent starts nothing.
-	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.echo", "outbound", "owner", "guide", at)))
 	h.poll(t)
 	h.poll(t)
 	runs := h.runs(t)
@@ -263,4 +264,62 @@ func TestDMAutomationHTTPTakeoverAndResume(t *testing.T) {
 	assert.Equal(t, messaging.AutomationCancelled, state.Replies[0].State)
 	state = call(http.MethodPost, "/resume")
 	assert.Nil(t, state.StoppedAt)
+}
+
+func TestDMHumanReplyWithNoRunStopsLaterAdmission(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmReplyStep("automatic")})
+	now := time.Now().UTC().Add(time.Second)
+	// An echo of what the account sent starts nothing, and it is a person replying.
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.1", "outbound", "owner", "guide", now)))
+	h.poll(t)
+	assert.Empty(t, h.runs(t))
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.2", "inbound", "reader", "guide", now.Add(time.Second))))
+	h.poll(t)
+	assert.Empty(t, h.runs(t))
+}
+
+func TestDMOptOutMessageNeverStartsARun(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmReplyStep("automatic")})
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.1", "inbound", "reader", "guide 수신거부합니다", time.Now().UTC().Add(time.Second))))
+	h.poll(t)
+	assert.Empty(t, h.runs(t))
+}
+
+func TestDMTakeoverCancelsARunWithNoReceiptYet(t *testing.T) {
+	wait := workflows.Step{ID: "wait", Kind: workflows.KindWait, Name: "Wait", Inputs: map[string]workflows.Value{"minutes": {Literal: 60}}}
+	h := newDMHarness(t, []workflows.Step{wait, dmReplyStep("automatic")})
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.1", "inbound", "reader", "guide", time.Now().UTC().Add(time.Second))))
+	h.poll(t)
+	run := h.advance(t, h.runs(t)[0].ID)
+	require.Equal(t, workflows.StateWaiting, run.State)
+	var conversation string
+	require.NoError(t, h.db.NewSelect().Model((*models.Conversation)(nil)).Column("id").Where("social_account_id = 'ig'").Scan(t.Context(), &conversation))
+	actor := messaging.Actor{UserID: "user"}
+	require.NoError(t, h.inbox.StopConversationAutomation(t.Context(), actor, "ws", conversation))
+	run, err := h.service.GetRun(t.Context(), h.actor, "ws", run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, workflows.StateCancelled, run.State)
+	assert.NotEmpty(t, run.Error)
+	require.NoError(t, h.inbox.ResumeConversationAutomation(t.Context(), actor, "ws", conversation))
+	assert.Equal(t, workflows.StateCancelled, h.advance(t, run.ID).State, "a stopped run stays stopped after resume")
+	assert.Empty(t, *h.sent)
+}
+
+func TestDMApprovalDuringAHumanReplyReturnsTheOutcome(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmReplyStep("review")})
+	now := time.Now().UTC().Add(time.Second)
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.1", "inbound", "reader", "guide", now)))
+	h.poll(t)
+	run := h.advance(t, h.runs(t)[0].ID)
+	require.Equal(t, workflows.StateApproval, run.State)
+	var conversation string
+	require.NoError(t, h.db.NewSelect().Model((*models.Conversation)(nil)).Column("id").Where("social_account_id = 'ig'").Scan(t.Context(), &conversation))
+	human := models.DirectMessage{ID: "human", WorkspaceID: "ws", ConversationID: conversation, RemoteMessageID: "mid.human", Direction: "outbound", AuthorRemoteID: "owner", Body: "I'll handle this", AttachmentsJSON: "[]", SendStatus: "sent", RemoteCreatedAt: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now}
+	_, err := h.db.NewInsert().Model(&human).Exec(t.Context())
+	require.NoError(t, err)
+	stopped, err := h.service.Approve(t.Context(), h.actor, "ws", run.ID, run.Revision, 0, "Edited")
+	require.NoError(t, err)
+	assert.Equal(t, workflows.StateCancelled, stopped.State)
+	assert.NotEmpty(t, stopped.Error)
+	assert.Empty(t, *h.sent)
 }

@@ -30,13 +30,13 @@ Only messages created and first stored after activation start runs. Earlier mess
 
 Open the conversation in **Inbox → Messages** to see each automatic message and its state. Workspace administrators can edit a message waiting for review and approve it. Editors can select **Take over**.
 
-**Take over** stops pending automatic messages in that conversation. So does sending a manual reply there, in OpenPost or in the Instagram app. Automation stays stopped in that conversation until someone selects **Resume automation**, which applies to future messages. Messages already being sent may still arrive.
+**Take over** stops pending automatic messages and every run for that conversation, including a run in a wait step. So does a reply sent by hand, in OpenPost or in the Instagram app, whether or not a run is active. Automation stays stopped in that conversation until someone selects **Resume automation**, which applies to future messages. Runs that stopped stay stopped. Messages already being sent may still be delivered.
 
 **Pause** stops new runs and leaves existing runs active. **Stop automatic replies** stops new runs and pending sends.
 
 ## What stops a message
 
-OpenPost checks again just before sending, including after a review or a queue delay. The run fails and shows the reason when any of these is true:
+Before each automatic message, OpenPost reads the conversation from Instagram and checks the result, so a recent request to stop is seen even if its webhook has not arrived. If Instagram cannot be read, OpenPost holds the message and retries for up to 10 minutes, then stops with a reason. It also checks after a review or a queue delay. The run fails and shows the reason when any of these is true:
 
 - Instagram's messaging window closed. The window normally lasts 24 hours from the person's latest message. OpenPost does not use message tags to extend it.
 - The person opted out.
@@ -46,8 +46,23 @@ OpenPost checks again just before sending, including after a review or a queue d
 
 A delay of 24 hours or more before a reply step fails when you publish, because that message could never be sent.
 
-People who send `STOP`, `unsubscribe`, `stop replying`, `그만` or `수신거부` as a whole message are opted out of automatic messages from that account, and the opt-out also covers its comment automation.
+### Opting out
 
-Failed and unconfirmed sends remain inspectable. OpenPost does not repeat a send when the outcome is uncertain. One message gets at most one automatic reply, even if Meta delivers its webhook twice. A conversation that receives five automatic replies in an hour stops receiving them until the hour passes.
+A short message asking to stop opts that person out of automatic messages from the account, and the opt-out also covers its comment automation. A message that opts out never starts a workflow. Capitalization, spacing, punctuation, and emoji are ignored.
+
+| Language | Recognized                                                                                                                                                                                                                                                                                                                                                        |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| English  | `stop`, alone or with `please`, `now`, `it` and similar words, and `stop` followed by `replying`, `messaging`, `texting`, `sending`, `contacting` or `dm`, such as `stop messaging me`. Any message of up to six words containing `unsubscribe`, `unsub`, `opt out`, `remove me`, `leave me alone`, `no more messages`, or `do not message`, `text` or `contact`. |
+| Korean   | Any message of up to 12 characters, not counting spaces, containing `그만`, such as `그만해요`, `그만 보내` or `이제 그만`. Words like `그만큼` and `그만두` do not count. Any message of up to 16 characters containing `수신거부`, `수신거절`, `수신취소`, `구독취소`, `구독해지`, `구독해제`, `보내지 마` or `연락하지 마`. `스탑` and `스톱` alone.           |
+
+Matching leans toward opting out, because a false match only silences automation for that person. `stop by the shop` and `don't stop` are not opt-outs.
+
+### Limits
+
+- A conversation receives at most five automatic messages an hour and 20 in 24 hours, across all workflows and comment campaigns. This also stops two connected accounts from answering each other indefinitely.
+- One person starts at most five runs of a workflow a day, so they cannot use up its daily run limit.
+- Runs that failed, were stopped, or were skipped do not count toward the daily run limit. Messages in a conversation someone took over never start a run.
+
+Failed and unconfirmed sends remain inspectable. OpenPost does not repeat a send when the outcome is uncertain. One message gets at most one automatic reply, even if Meta delivers its webhook twice.
 
 See [Meta's messaging documentation](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api) for provider requirements. This workflow does not include follower gates, email capture or broadcasts.

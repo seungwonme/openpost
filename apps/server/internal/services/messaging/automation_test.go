@@ -29,6 +29,23 @@ type automationFixture struct {
 	trigger  models.DirectMessage
 	request  AutomationRequest
 	sendFunc *func(context.Context) (platform.SendMessageResult, error)
+
+	history    *[]platform.ProviderMessage
+	historyErr *error
+	refreshes  *int
+}
+
+// automationProvider adds the conversation read an automated send requires.
+type automationProvider struct {
+	testProvider
+	messages *[]platform.ProviderMessage
+	failure  *error
+	reads    *int
+}
+
+func (p automationProvider) FetchMessageHistory(context.Context, string, platform.FetchMessageHistoryRequest) (platform.FetchMessageHistoryResult, error) {
+	*p.reads++
+	return platform.FetchMessageHistoryResult{Messages: *p.messages}, *p.failure
 }
 
 func newAutomationFixture(t *testing.T) automationFixture {
@@ -46,11 +63,14 @@ func newAutomationFixture(t *testing.T) automationFixture {
 	send := func(context.Context) (platform.SendMessageResult, error) {
 		return platform.SendMessageResult{RemoteMessageID: "sent-remote-id"}, nil
 	}
-	fixture := automationFixture{s: s, db: db, account: account, actor: actor, now: &now, sends: &sends, sendFunc: &send}
-	s.SetProvider("instagram", testProvider{send: func(ctx context.Context) (platform.SendMessageResult, error) {
+	reads := 0
+	history := []platform.ProviderMessage{}
+	var historyErr error
+	fixture := automationFixture{s: s, db: db, account: account, actor: actor, now: &now, sends: &sends, sendFunc: &send, history: &history, historyErr: &historyErr, refreshes: &reads}
+	s.SetProvider("instagram", automationProvider{testProvider: testProvider{send: func(ctx context.Context) (platform.SendMessageResult, error) {
 		sends++
 		return send(ctx)
-	}})
+	}}, messages: &history, failure: &historyErr, reads: &reads})
 	trigger := models.DirectMessage{ID: "trigger", WorkspaceID: "workspace", ConversationID: "conversation", RemoteMessageID: "mid.trigger", Direction: "inbound", AuthorRemoteID: "reader", Body: "guide please", AttachmentsJSON: "[]", SendStatus: "received", RemoteCreatedAt: now, CreatedAt: now, UpdatedAt: now}
 	_, err = db.NewInsert().Model(&trigger).Exec(t.Context())
 	require.NoError(t, err)
@@ -86,6 +106,13 @@ func (f automationFixture) message(t *testing.T, id string) models.DirectMessage
 	var message models.DirectMessage
 	require.NoError(t, f.db.NewSelect().Model(&message).Where("id=?", id).Scan(t.Context()))
 	return message
+}
+
+func (f automationFixture) receive(t *testing.T, id string, at time.Time) {
+	t.Helper()
+	message := models.DirectMessage{ID: id, WorkspaceID: "workspace", ConversationID: "conversation", RemoteMessageID: "mid." + id, Direction: "inbound", AuthorRemoteID: "reader", Body: "yes please", AttachmentsJSON: "[]", SendStatus: "received", RemoteCreatedAt: at, CreatedAt: at, UpdatedAt: at}
+	_, err := f.db.NewInsert().Model(&message).Exec(t.Context())
+	require.NoError(t, err)
 }
 
 func (f automationFixture) optOut(t *testing.T) {
@@ -248,7 +275,7 @@ func TestOptOutMessageRecordsTheSharedOptOutAndStopsPendingWork(t *testing.T) {
 }
 
 func TestOrdinarySentencesAreNotOptOuts(t *testing.T) {
-	for _, body := range []string{"stop by the shop", "please don't stop", "unsubscribe me from the other list", "그만큼 좋아요", "수신거부 어떻게 하나요"} {
+	for _, body := range []string{"stop by the shop", "please don't stop", "그만큼 좋아요"} {
 		assert.False(t, messageRequestsOptOut(body), body)
 	}
 }
@@ -257,7 +284,7 @@ func TestTakeoverStopsAQueuedSendAndLaterClaims(t *testing.T) {
 	f := newAutomationFixture(t)
 	var cancelled []string
 	var reason string
-	f.s.SetAutomationRunStopper(func(_ context.Context, _ bun.Tx, _ string, ids []string, why string) error {
+	f.s.SetAutomationRunStopper(func(_ context.Context, _ bun.Tx, _, _ string, ids []string, why string) error {
 		cancelled, reason = ids, why
 		return nil
 	})

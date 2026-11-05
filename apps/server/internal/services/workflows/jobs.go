@@ -285,7 +285,11 @@ func commentDailyLimitReached(ctx context.Context, db bun.IDB, record workflowRe
 	if !isInteractionSource(def.Source.Kind) {
 		return false, nil
 	}
-	count, err := db.NewSelect().Model((*runRecord)(nil)).Where("workflow_id = ? AND mode = ? AND created_at >= ?", record.ID, ModeLive, now.Truncate(24*time.Hour)).Count(ctx)
+	query := db.NewSelect().Model((*runRecord)(nil)).Where("workflow_id = ? AND mode = ? AND created_at >= ?", record.ID, ModeLive, now.Truncate(24*time.Hour))
+	if def.Source.Kind == "message_received" {
+		query = countMessageRuns(query)
+	}
+	count, err := query.Count(ctx)
 	return count >= def.Source.DailyLimit, err
 }
 
@@ -317,7 +321,7 @@ func (s *Service) admitSourceEvent(ctx context.Context, tx bun.Tx, record workfl
 		}
 	}
 	if def.Source.Kind == "message_received" {
-		return s.messageWorkflowWins(ctx, tx, record, item.ID)
+		return s.admitMessageEvent(ctx, tx, record, item, now)
 	}
 	return true, nil
 }

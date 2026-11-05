@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -323,4 +324,65 @@ func (stopRecorder) Execute(context.Context, EffectRequest) (EffectResult, error
 func (r stopRecorder) StopReplies(_ context.Context, _ workspaceaccess.StoredAuthority, workflowID, _ string) error {
 	*r.stopped = append(*r.stopped, workflowID)
 	return nil
+}
+
+func (f *messageSourceFixture) conversation(t *testing.T, id, counterpart string) {
+	t.Helper()
+	now := time.Now().UTC()
+	row := models.Conversation{ID: id, WorkspaceID: "ws", SocialAccountID: "ig", Platform: "instagram", RemoteConversationID: "t-" + id, CounterpartRemoteID: counterpart, MessagingWindowExpiresAt: now.Add(24 * time.Hour), CreatedAt: now, UpdatedAt: now}
+	_, err := f.s.db.NewInsert().Model(&row).Exec(t.Context())
+	require.NoError(t, err)
+}
+
+func TestMessageDailyLimitCountsOnlyRunsThatCouldAnswer(t *testing.T) {
+	f := newMessageSourceFixture(t, "sqlite")
+	source := messageSource()
+	source.DailyLimit = 2
+	workflow := f.publish(t, source, nil)
+	f.conversation(t, "c-a", "reader-a")
+	f.conversation(t, "c-b", "reader-b")
+	f.conversation(t, "c-c", "reader-c")
+	f.message(t, models.DirectMessage{ID: "failed", ConversationID: "c-a", AuthorRemoteID: "reader-a", Body: "hi"})
+	f.message(t, models.DirectMessage{ID: "skipped", ConversationID: "c-b", AuthorRemoteID: "reader-b", Body: "hi"})
+	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+	require.Len(t, f.runSources(t, workflow.ID), 2)
+	_, err := f.s.db.NewRaw(`UPDATE workflow_runs SET state = 'failed' WHERE workflow_id = ? AND source_json LIKE '%failed%'`, workflow.ID).Exec(t.Context())
+	require.NoError(t, err)
+	_, err = f.s.db.NewRaw(`UPDATE workflow_runs SET state = 'succeeded', results_json = '[{"output":{"status":"skipped"}}]' WHERE workflow_id = ? AND source_json LIKE '%skipped%'`, workflow.ID).Exec(t.Context())
+	require.NoError(t, err)
+	f.message(t, models.DirectMessage{ID: "answered", ConversationID: "c-c", AuthorRemoteID: "reader-c", Body: "hi"})
+	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+	assert.Contains(t, f.runSources(t, workflow.ID), "answered")
+}
+
+func TestOneSenderCannotExhaustAWorkflowsDailyLimit(t *testing.T) {
+	f := newMessageSourceFixture(t, "sqlite")
+	workflow := f.publish(t, messageSource(), nil)
+	f.conversation(t, "c-other", "another-reader")
+	for i := range maxMessageRunsPerSender + 3 {
+		f.message(t, models.DirectMessage{ID: fmt.Sprintf("same-%d", i), AuthorRemoteID: "reader", Body: "hi", CreatedAt: time.Now().UTC().Add(time.Duration(i+1) * time.Minute)})
+	}
+	f.message(t, models.DirectMessage{ID: "other", ConversationID: "c-other", AuthorRemoteID: "another-reader", Body: "hi", CreatedAt: time.Now().UTC().Add(time.Hour)})
+	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+	sources := f.runSources(t, workflow.ID)
+	assert.Len(t, sources, maxMessageRunsPerSender+1)
+	assert.Contains(t, sources, "other")
+}
+
+func TestTakenOverConversationStartsNoRunEvenAfterResume(t *testing.T) {
+	f := newMessageSourceFixture(t, "sqlite")
+	workflow := f.publish(t, messageSource(), nil)
+	_, err := f.s.db.NewRaw(`INSERT INTO message_automation_stops(conversation_id,workspace_id,stopped_by,reason,stopped_at) VALUES('c-reader','ws','provider','person',?)`, time.Now().UTC()).Exec(t.Context())
+	require.NoError(t, err)
+	f.message(t, models.DirectMessage{ID: "during", AuthorRemoteID: "reader", Body: "hi"})
+	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+	assert.Empty(t, f.runSources(t, workflow.ID))
+
+	_, err = f.s.db.NewRaw(`DELETE FROM message_automation_stops WHERE conversation_id = 'c-reader'`).Exec(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+	assert.Empty(t, f.runSources(t, workflow.ID), "resume applies to future messages")
+	f.message(t, models.DirectMessage{ID: "after", AuthorRemoteID: "reader", Body: "hi"})
+	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+	assert.Equal(t, []string{"after"}, f.runSources(t, workflow.ID))
 }
