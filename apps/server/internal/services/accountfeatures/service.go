@@ -84,7 +84,17 @@ type Service struct {
 	analyticsSources map[string]platform.AnalyticsAdapter
 	planPolicy       PlanPolicy
 	now              func() time.Time
+	webhooks         WebhookSubscriber
 }
+
+// WebhookSubscriber subscribes a provider account to inbound webhooks after a
+// feature that depends on them is enabled. Failures are the subscriber's to
+// record; they never fail the feature save.
+type WebhookSubscriber interface {
+	Ensure(ctx context.Context, accountID string) error
+}
+
+func (s *Service) SetWebhookSubscriber(subscriber WebhookSubscriber) { s.webhooks = subscriber }
 
 func NewService(db bun.IDB, providers map[string]platform.Adapter, policy PlanPolicy) *Service {
 	if policy == nil {
@@ -402,14 +412,45 @@ func (s *Service) executeBatchTx(ctx context.Context, actor workspaceaccess.Acto
 }) error {
 	now := s.now().UTC()
 	sweepEnqueued := map[string]bool{}
-	return s.db.RunInTx(ctx, &sql.TxOptions{}, func(txCtx context.Context, tx bun.Tx) error {
+	if err := s.db.RunInTx(ctx, &sql.TxOptions{}, func(txCtx context.Context, tx bun.Tx) error {
 		for _, in := range deduped {
 			if err := s.applyChoiceTx(txCtx, tx, actor, byID, in, supportCache, sweepEnqueued, now); err != nil {
 				return err
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	s.subscribeWebhooks(ctx, byID, deduped, supportCache)
+	return nil
+}
+
+// subscribeWebhooks runs after the choices commit. Instagram delivers comment
+// and message events only to subscribed accounts, so enabling either feature
+// subscribes the account. The attempt is repeated on every enable because
+// Meta treats it as idempotent and an earlier one may have failed.
+func (s *Service) subscribeWebhooks(ctx context.Context, byID map[string]models.SocialAccount, inputs []ChoiceInput, supportCache map[string]struct {
+	supported bool
+	missing   []string
+	allowed   bool
+}) {
+	if s.webhooks == nil {
+		return
+	}
+	done := map[string]bool{}
+	for _, in := range inputs {
+		support := supportCache[in.AccountID+"|"+in.Feature]
+		if !in.Enabled || done[in.AccountID] || byID[in.AccountID].Platform != "instagram" ||
+			(in.Feature != FeatureEngagement && in.Feature != FeatureMessaging) ||
+			!support.supported || len(support.missing) > 0 || !support.allowed {
+			continue
+		}
+		done[in.AccountID] = true
+		// The subscriber records its own failure for the inbox; the saved
+		// choice stands either way.
+		_ = s.webhooks.Ensure(ctx, in.AccountID)
+	}
 }
 
 func (s *Service) applyChoiceTx(ctx context.Context, tx bun.Tx, actor workspaceaccess.ActorFacts, byID map[string]models.SocialAccount, in ChoiceInput, supportCache map[string]struct {

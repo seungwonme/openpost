@@ -135,15 +135,60 @@ End-to-end verification of this flow against a freshly created Meta app is still
 2. For direct login, authorize the Instagram professional account. For Facebook Login, sign in with the person who manages the linked Page, grant Page access, and select the Instagram account returned by Meta.
 3. Publish one image with a short caption. Confirm the result in OpenPost and on Instagram. Test Reels, carousels, and Stories separately if you need them. Instagram requires media; OpenPost can turn text-only drafts into image cards before publishing. Optional Comments and replies, Direct messages, and Analytics start disabled per account.
 
+## Receive comment and message webhooks
+
+Meta sends Instagram comment and message events to your server as webhooks. Without them, OpenPost can read comments and messages only when they are fetched, and Comments and Direct messages stay slow to update. Two parts must be in place: a callback URL and verify token in the Meta dashboard, and a per-account subscription that OpenPost makes for you.
+
+### Set the callback in Meta
+
+Each connection method has its own callback URL. Use your instance's public HTTPS origin (`OPENPOST_APP_URL`) and the exact client ID of that method's provider app:
+
+| Connection method       | Callback URL                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------ |
+| Continue with Instagram | `https://post.example.com/api/v1/provider-inbox/meta/instagram:instagram_login:INSTAGRAM_APP_ID` |
+| Continue with Facebook  | `https://post.example.com/api/v1/provider-inbox/meta/instagram:META_APP_ID`                      |
+
+Replace `INSTAGRAM_APP_ID` with the **Instagram App ID** and `META_APP_ID` with the Meta **App ID** from the provider app entry. The colons are part of the address.
+
+1. Choose a long random string as the **verify token** and store it as the provider app's `webhook_secret`. Add `"webhook_secret": "your-verify-token"` to the entry in `OPENPOST_PROVIDER_APPS`, or send it as `webhook_secret` when you save the provider app through the administrator API (`POST /admin/provider-apps`). Omit the field on later saves to keep the stored value. The Provider apps form in settings has no field for it.
+2. Restart OpenPost. The callback exists only when the client ID, client secret, and `webhook_secret` are all set, and it reads them at startup.
+3. In the Meta dashboard, open the webhooks configuration for the Instagram product (**API setup with Instagram login** for direct login, or the Instagram webhooks of the Facebook Login app). Enter the callback URL and the same verify token, then verify. Meta calls the URL with a challenge; OpenPost answers it when the token matches.
+4. Select the `comments` and `messages` fields. OpenPost subscribes accounts to exactly these two fields. An account receives every field the app selects.
+
+OpenPost verifies the `X-Hub-Signature-256` signature of each event with the provider app's client secret.
+
+### Account subscription
+
+Meta delivers an account's events only after the app subscribes that account through the `/subscribed_apps` edge. OpenPost makes that call when you turn on **Comments and replies** or **Direct messages** for an Instagram account, and again each time you reconnect the account while one of them is on. Repeating the call is safe.
+
+| Connection method       | Subscription request                                                              | Token used           |
+| ----------------------- | --------------------------------------------------------------------------------- | -------------------- |
+| Continue with Instagram | `POST graph.instagram.com/{version}/{instagram-account-id}/subscribed_apps`       | Instagram user token |
+| Continue with Facebook  | `POST graph.facebook.com/{version}/{page-id}/subscribed_apps`, on the linked Page | Facebook Page token  |
+
+A failed subscription never disconnects the account or reverts the switch. It appears in **Inbox → Comments** as a sync problem for the account, with the reason and the fix. Turn the feature off and on, or reconnect the account, to retry.
+
+OpenPost does not hold the Business Integration System User token that Meta's Unified Login subscription request requires, so it does not subscribe through that route. An account connected through a Facebook Login for Business `config_id` is subscribed on its linked Page like any other Facebook Login account. Whether Meta accepts that Page request for such an app is not verified; if the account shows a subscription problem and webhooks do not arrive, report it.
+
+### Requirements for delivery
+
+- The Meta app must be **Live**. A development-mode app does not receive notifications for other users.
+- **Advanced Access** is required for the `comments` field, and Meta requires business verification for production access.
+- The Instagram account that owns the media must be **public**. Private accounts receive no comment webhooks.
+- Each permission needs approval for your intended users: `instagram_business_manage_comments` and `instagram_business_manage_messages` for direct login, or `instagram_manage_comments`, `instagram_manage_messages`, and `pages_manage_metadata` for Facebook Login.
+
+See Meta's [Instagram webhooks guide](https://developers.facebook.com/documentation/instagram-platform/webhooks) for the dashboard steps and field list.
+
 ## Troubleshoot
 
-| Problem                                                            | Check                                                                                                                                                                                                            |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Connection method is disabled                                      | Configure that method's provider app and restart OpenPost. Direct login uses `connection_mode: "instagram_login"`; Facebook Login omits it or uses `"oauth"`. Keep both entries to offer both methods.           |
-| No Instagram account appears through Facebook                      | Verify it is Business or Creator, linked to a Page the signed-in person can manage, and that the Page and Instagram permissions were granted. Without a linked Page, choose **Continue with Instagram** instead. |
-| Media creation fails                                               | Fetch a specific uploaded file URL under `OPENPOST_MEDIA_URL` from outside your network. It must be public HTTPS and return the correct file and media type.                                                     |
-| Permission or redirect error                                       | Check app review, the scopes granted in consent, and the exact redirect URI. Reconnect after changing permissions.                                                                                               |
-| New Meta app fails with "Invalid platform app" or "Invalid Scopes" | Meta forces newer apps onto Unified Login. Use a Facebook Login for Business configuration and add its `config_id` to the Instagram provider app entry. Apps created before the change are unaffected.           |
+| Problem                                                            | Check                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Connection method is disabled                                      | Configure that method's provider app and restart OpenPost. Direct login uses `connection_mode: "instagram_login"`; Facebook Login omits it or uses `"oauth"`. Keep both entries to offer both methods.                                                                        |
+| No Instagram account appears through Facebook                      | Verify it is Business or Creator, linked to a Page the signed-in person can manage, and that the Page and Instagram permissions were granted. Without a linked Page, choose **Continue with Instagram** instead.                                                              |
+| Media creation fails                                               | Fetch a specific uploaded file URL under `OPENPOST_MEDIA_URL` from outside your network. It must be public HTTPS and return the correct file and media type.                                                                                                                  |
+| Permission or redirect error                                       | Check app review, the scopes granted in consent, and the exact redirect URI. Reconnect after changing permissions.                                                                                                                                                            |
+| No comment or message webhooks arrive                              | Open **Inbox → Comments** for a subscription problem. Then check that the app is Live, the callback URL and verify token match, the account is public, and `comments` has Advanced Access. See [Receive comment and message webhooks](#receive-comment-and-message-webhooks). |
+| New Meta app fails with "Invalid platform app" or "Invalid Scopes" | Meta forces newer apps onto Unified Login. Use a Facebook Login for Business configuration and add its `config_id` to the Instagram provider app entry. Apps created before the change are unaffected.                                                                        |
 
 If Instagram shows the post but OpenPost reports a failed or uncertain delivery, do not publish it again. Graph error `100/33` can mean the object is inaccessible or the operation is unsupported; it does not prove that a Facebook Page or Instagram post was deleted. OpenPost keeps an ambiguous final publish request pending and checks the saved container without repeating the publish request.
 

@@ -45,10 +45,14 @@ checkout can move or be renamed without starting on an empty volume.
 
 ## Fork-only paths
 
-| Path | Purpose |
-| --- | --- |
-| `FORK.md` | This file |
-| `docker-compose.macmini.yml` | Mac mini production overlay |
-| `scripts/fork/` | Mac mini deployment, backup, and restore |
-| `apps/docs/content/docs/self-hosting/macbook-macmini.mdx` | Mac mini runbook |
-| `apps/server/internal/services/trackedlinks/` | Tracked redirect links (`/go/:slug`) |
+| Path                                                                                | Purpose                                                              |
+| ----------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `FORK.md`                                                                           | This file                                                            |
+| `docker-compose.macmini.yml`                                                        | Mac mini production overlay                                          |
+| `scripts/fork/`                                                                     | Mac mini deployment, backup, and restore                             |
+| `apps/docs/content/docs/self-hosting/macbook-macmini.mdx`                           | Mac mini runbook                                                     |
+| `apps/server/internal/services/trackedlinks/`                                       | Tracked redirect links (`/go/:slug`)                                 |
+| `apps/server/internal/services/instagramwebhook/`                                   | Subscribes Instagram accounts to Meta webhooks and records readiness |
+| `apps/server/internal/platform/instagram_webhook_subscription.go`                   | Instagram `/subscribed_apps` request per login mode                  |
+| `apps/server/internal/models/instagram_webhook_subscription.go`                     | Subscription attempt model                                           |
+| `apps/server/internal/database/migrations/9002_instagram_webhook_subscriptions.sql` | Subscription attempts table                                          |
