@@ -536,7 +536,7 @@ func (s *Service) automationEchoOf(ctx context.Context, db bun.IDB, conversation
 	at := automationMessageTime(message)
 	for _, candidate := range append(candidates, private...) {
 		if candidate.sameID {
-			return automationEcho{owned: true}, nil
+			return automationEcho{owned: true, receiptID: candidate.id, receiptState: echoConfirmed}, nil
 		}
 		if match.owned || candidate.body != message.Body || !withinEchoBound(candidate.updatedAt, at) {
 			continue
@@ -602,7 +602,7 @@ func (s *Service) claimAutomationEcho(ctx context.Context, db bun.IDB, conversat
 	if _, err := db.NewRaw("INSERT INTO message_automation_echoes(receipt_id,conversation_id,message_id,receipt_state,created_at) VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING", echo.receiptID, conversationID, messageID, echo.receiptState, s.now()).Exec(ctx); err != nil {
 		return err
 	}
-	if echo.receiptState == AutomationSending {
+	if echo.receiptState == AutomationSending || echo.receiptState == echoConfirmed {
 		return nil
 	}
 	return logEchoMismatch(ctx, db, conversationID, echo.receiptState)

@@ -21,15 +21,15 @@ type State struct {
 
 // Record stores an opt-out requested at the given time. A provider can deliver the
 // same message or comment again, so one no newer than the latest removal stays
-// removed. An unknown time cannot be shown to be newer.
+// removed. A caller seeing something again passes the time it was first stored. An
+// unknown time is a new request: wrongly honoring a refusal can be removed again,
+// and wrongly ignoring one keeps messaging someone who said stop.
 func Record(ctx context.Context, db bun.IDB, accountID, author string, requestedAt, now time.Time) (bool, error) {
-	removed := db.NewSelect().Table("automation_optout_removals").Where("social_account_id = ? AND author_remote_id = ?", accountID, author)
 	if !requestedAt.IsZero() {
-		removed = removed.Where("removed_at >= ?", requestedAt)
-	}
-	blocked, err := removed.Exists(ctx)
-	if err != nil || blocked {
-		return false, err
+		blocked, err := db.NewSelect().Table("automation_optout_removals").Where("social_account_id = ? AND author_remote_id = ? AND removed_at >= ?", accountID, author, requestedAt).Exists(ctx)
+		if err != nil || blocked {
+			return false, err
+		}
 	}
 	result, err := db.NewRaw("INSERT INTO engagement_automation_optouts(social_account_id,author_remote_id,created_at) VALUES(?,?,?) ON CONFLICT DO NOTHING", accountID, author, now).Exec(ctx)
 	if err != nil {

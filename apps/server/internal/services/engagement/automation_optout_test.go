@@ -58,6 +58,59 @@ func TestCommentAuthorOptOutCanBeRemoved(t *testing.T) {
 	assert.True(t, flagged(), "a newer refusal counts")
 }
 
+func TestCommentRefusalAfterARemoval(t *testing.T) {
+	const instagramLayout = "2006-01-02T15:04:05-0700"
+	setup := func(t *testing.T) (*Service, func(string, string), func() bool) {
+		t.Helper()
+		s, _, _ := campaignTest(t)
+		var account models.SocialAccount
+		var rendition models.Rendition
+		require.NoError(t, s.db.NewSelect().Model(&account).Where("id = 'a'").Scan(t.Context()))
+		require.NoError(t, s.db.NewSelect().Model(&rendition).Where("id = 'r'").Scan(t.Context()))
+		see := func(id, createdAt string) {
+			t.Helper()
+			require.NoError(t, s.db.RunInTx(t.Context(), nil, func(ctx context.Context, tx bun.Tx) error {
+				_, _, err := persistEngagementComment(ctx, tx, rendition, account, platform.Comment{ID: id, AuthorID: "reader", Text: "stop", CreatedAt: createdAt}, s.now())
+				return err
+			}))
+		}
+		optedOut := func() bool {
+			t.Helper()
+			exists, err := s.db.NewSelect().Table("engagement_automation_optouts").Where("social_account_id = 'a' AND author_remote_id = 'reader'").Exists(t.Context())
+			require.NoError(t, err)
+			return exists
+		}
+		return s, see, optedOut
+	}
+	remove := func(t *testing.T, s *Service) {
+		t.Helper()
+		require.NoError(t, s.RemoveAutomationOptOut(t.Context(), Actor{UserID: "u"}, "w", "c"))
+	}
+	t.Run("a new stop in Instagram's time format opts out again", func(t *testing.T) {
+		s, see, optedOut := setup(t)
+		base := time.Now().UTC().Truncate(time.Second)
+		see("first", base.Add(-time.Hour).Format(instagramLayout))
+		require.True(t, optedOut())
+		remove(t, s)
+		require.False(t, optedOut())
+		see("first", base.Add(-time.Hour).Format(instagramLayout))
+		assert.False(t, optedOut(), "the same comment seen again with its known old time does not undo the removal")
+		see("second", base.Add(time.Hour).Format(instagramLayout))
+		assert.True(t, optedOut())
+	})
+	t.Run("a new stop with no time opts out again, and seeing it again does not undo a removal", func(t *testing.T) {
+		s, see, optedOut := setup(t)
+		base := time.Now().UTC().Truncate(time.Second)
+		see("first", base.Add(-time.Hour).Format(instagramLayout))
+		remove(t, s)
+		see("no-time", "")
+		assert.True(t, optedOut(), "wrongly honoring is the safe direction")
+		remove(t, s)
+		see("no-time", "")
+		assert.False(t, optedOut(), "first stored before the removal")
+	})
+}
+
 func TestRemovalAppliesToTheSameRecordOnBothChannels(t *testing.T) {
 	s, _, _ := campaignTest(t)
 	now := time.Now().UTC()

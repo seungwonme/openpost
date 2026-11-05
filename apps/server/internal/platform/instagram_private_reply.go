@@ -50,8 +50,10 @@ func (i *InstagramAdapter) ReadWebhookComment(ctx context.Context, token, accoun
 	if err := json.Unmarshal(data, &remote); err != nil {
 		return Comment{}, "", err
 	}
-	if remote.ID != commentID || remote.Timestamp == "" {
-		return Comment{}, "", errors.New("comment identity or creation time is unavailable from Instagram")
+	// A comment with no time still reaches the opt-out check. Private replies refuse it
+	// themselves, because the seven-day window cannot be shown to be open.
+	if remote.ID != commentID {
+		return Comment{}, "", errors.New("comment identity is unavailable from Instagram")
 	}
 	// Fetch the media independently to retain its permanent link. The signed
 	// callback already binds mediaID to the receiving professional account.

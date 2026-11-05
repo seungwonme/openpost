@@ -409,7 +409,7 @@ func insertProviderMessage(ctx context.Context, db bun.IDB, account models.Socia
 func findStoredMessage(ctx context.Context, db bun.IDB, conversationID, remoteID string) (models.DirectMessage, bool, error) {
 	var stored models.DirectMessage
 	err := db.NewSelect().Model(&stored).
-		Column("id", "body", "attachments_json", "deleted_at", "remote_created_at").
+		Column("id", "body", "attachments_json", "deleted_at", "remote_created_at", "created_at").
 		Where("conversation_id = ? AND remote_message_id = ?", conversationID, remoteID).
 		Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
