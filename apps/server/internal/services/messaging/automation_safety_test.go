@@ -225,14 +225,14 @@ func TestOwnershipPrefersTheProviderMessageID(t *testing.T) {
 func TestOptOutTiers(t *testing.T) {
 	tests := map[optOutTier][]string{
 		optOutDefinite: {
-			"STOP", "stop", "Stop!", "stop.", " Stop. ", "unsubscribe", "stop replying", "STOP ❤️", "stop 🙏", "❤️ stop", "ＳＴＯＰ",
+			"STOP", "stop", "Stop!", "stop.", " Stop. ", "unsubscribe", "stop replying", "ＳＴＯＰ",
 			"stop please", "please stop", "stop it", "stop now please", "stop messaging me", "stop texting", "stop texting me", "stop sending me messages",
 			"opt out", "optout", "opt me out", "unsub", "unsubscribe me", "do not message me", "don't message me", "dont text me", "no more messages", "leave me alone", "remove me",
-			"그만", "그만!", "그만 해", "그만해", "그만 해요", "그만해요", "그만요", "그만 해주세요", "그만해주세요", "그만해줘", "그만보내", "그만 보내", "그만 보내요", "그만 보내줘", "그만 보내세요", "그만 보내주세요", "이제 그만", "제발 그만해 🙏", "그만 좀", "그만 🙏", "메시지 그만 보내주세요",
+			"그만", "그만!", "그만 해", "그만해", "그만 해요", "그만해요", "그만요", "그만 해주세요", "그만해주세요", "그만해줘", "그만보내", "그만 보내", "그만 보내요", "그만 보내줘", "그만 보내세요", "그만 보내주세요", "이제 그만", "그만 좀", "메시지 그만 보내주세요",
 			"보내지 마세요", "보내지마", "보내지 마", "보내지 말아주세요", "연락하지 마세요", "메시지 보내지 마세요",
 			"제발 그만 보내세요", "STOP!", "dont message me",
 			"연락 주지 마세요", "연락주지마", "연락 주지 마", "연락 주지 마요", "연락 주지 말아주세요", "연락 마세요", "연락 말아주세요", "제발 연락 주지 마세요", "문자 주지 마세요", "메시지 주지 마세요", "메세지 주지 마세요", "디엠 주지 마세요",
-			"수신거부", "수신 거부", "수신거부합니다", "수신거부요", "수신 거부 합니다", "수신 거부할게요", "수신거절", "구독취소", "구독 취소", "구독취소요", "구독 해지", "스탑", "스톱",
+			"수신거부", "수신 거부", "수신거부합니다", "수신거부요", "수신 거부 합니다", "수신 거부할게요", "수신거절", "스탑", "스톱",
 		},
 		optOutPossible: {
 			"수신거부 어떻게 하나요", "수신 거부 해제해주세요", "구독취소 환불 되나요", "이제 그만 고민할게요", "그만 웃겨요 ㅋㅋㅋ", "how do i unsubscribe", "알림 끄는 법 알려주세요",
@@ -240,6 +240,8 @@ func TestOptOutTiers(t *testing.T) {
 			"stop?", "그만?", "수신거부요?", "unsubscribe?", "could you please stop messaging me", "stop the music", "when do you stop serving lunch", "unsubscribe me from the other list",
 			"cancel", "Cancel it", "please cancel it", "cancel it please", "cancel this", "cancel all", "cancel please", "cancel?", "거부", "차단", "차단합니다", "제발 차단", "알림 꺼주세요", "알림 끄는 법", "알림 끄면 못 받나요",
 			"stop this", "stop all", "stop me", "stop to", "stop text",
+			"구독취소", "구독 취소", "구독취소요", "구독 해지", "구독해지", "구독 해지해주세요", "구독취소 해주세요", "구독 해제요", "구독해제합니다",
+			"stop it 😂", "그만요 😂", "그만요 ㅋㅋ", "stop lol", "STOP ❤️", "stop 🙏", "❤️ stop", "제발 그만해 🙏", "그만 🙏", "수신거부 😡", "unsubscribe 🙏", "remove me 😂", "연락 마세요 😂", "문자하지 마세요 😂", "디엠하지 마세요 🙏",
 			"차단요", "거부요", "cancel me", "cancel text", "문자로 보내지 말고 여기로요", "구독해지 방법 알려주세요", "remove me from the waitlist please", "아직 보내지 마세요",
 			"please cancel", "연락 주지 말고 문자로 해주세요", "아직 연락 주지 마세요", "연락 안 주셔도 돼요", "수신거부 했는데 왜 또 오죠",
 		},

@@ -98,7 +98,8 @@ func koreanOptOutCommands() map[string]bool {
 		}
 	}
 	add([]string{"그만"}, []string{"", "요", "해", "해요", "해라", "해줘", "해줘요", "해주세요", "하세요", "하십시오", "보내", "보내요", "보내라", "보내줘", "보내줘요", "보내세요", "보내주세요", "보내십시오"})
-	add([]string{"수신거부", "수신거절", "수신취소", "구독취소", "구독해지", "구독해제"}, []string{"", "요", "합니다", "할게요", "해요", "해주세요", "해줘"})
+	// Cancelling a subscription can be about a paid plan, so those forms are only possible requests.
+	add([]string{"수신거부", "수신거절", "수신취소"}, []string{"", "요", "합니다", "할게요", "해요", "해주세요", "해줘"})
 	add([]string{"보내지", "연락하지", "문자하지", "디엠하지", "연락주지", "문자주지", "메시지주지", "메세지주지", "디엠주지", "연락"}, []string{"마", "마요", "마세요", "마십시오", "마라", "말아요", "말아주세요", "말아줘", "말아줘요"})
 	add(koreanStopWords, []string{"", "요", "해주세요"})
 	return commands
@@ -110,7 +111,8 @@ func koreanOptOutCommands() map[string]bool {
 // person, who can tell "수신거부 어떻게 하나요" from a real request. Compatibility
 // normalization folds full-width letters and decomposed Hangul, and splitting on
 // anything that is not a letter or number removes punctuation, emoji, variation
-// selectors and joiners. Korean compares without spaces.
+// selectors and joiners. Korean compares without spaces. An emoji can change what the
+// words mean, as in "stop it 😂", so a message with one is at most possible.
 func classifyOptOut(body string) optOutTier {
 	normalized := strings.ToLower(norm.NFKC.String(body))
 	words := strings.FieldsFunc(normalized, func(r rune) bool {
@@ -120,13 +122,22 @@ func classifyOptOut(body string) optOutTier {
 		return optOutNone
 	}
 	compact := strings.Join(words, "")
-	if !strings.Contains(normalized, "?") && (englishRefuses(words) || koreanRefuses(compact)) {
-		return optOutDefinite
+	if englishRefuses(words) || koreanRefuses(compact) {
+		if strings.ContainsFunc(normalized, isEmoji) {
+			return optOutPossible
+		}
+		if !strings.Contains(normalized, "?") {
+			return optOutDefinite
+		}
 	}
 	if englishMentionsStopping(words) || koreanMentionsStopping(words, compact) {
 		return optOutPossible
 	}
 	return optOutNone
+}
+
+func isEmoji(r rune) bool {
+	return unicode.Is(unicode.So, r)
 }
 
 func englishRefuses(words []string) bool {
