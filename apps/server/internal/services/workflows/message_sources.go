@@ -88,11 +88,14 @@ func messageSourceQuery(db bun.IDB, workspaceID string) *bun.SelectQuery {
 		// it reaches another connected account and arrives as inbound.
 		Where("c.counterpart_remote_id <> '' AND c.counterpart_remote_id <> a.account_id AND d.author_remote_id <> a.account_id").
 		Where("NOT EXISTS (SELECT 1 FROM social_accounts own WHERE own.workspace_id = d.workspace_id AND own.platform = 'instagram' AND own.account_id = c.counterpart_remote_id)").
-		Where("NOT EXISTS (SELECT 1 FROM engagement_automation_optouts o WHERE o.social_account_id = c.social_account_id AND o.author_remote_id = c.counterpart_remote_id)")
+		Where("NOT EXISTS (SELECT 1 FROM engagement_automation_optouts o WHERE o.social_account_id = c.social_account_id AND o.author_remote_id = c.counterpart_remote_id)").
+		Where("NOT EXISTS (SELECT 1 FROM message_history_imports h WHERE h.message_id = d.id)")
 }
 
 // Read canonical Inbox inventory. Both the provider creation time and the first
-// local storage must follow activation, so history imports never start a run.
+// local storage must follow activation, which excludes anything older. A recent
+// message first stored from a history page passes those times, so the source
+// query excludes it by its import record.
 func (s *Service) messageItems(ctx context.Context, workspaceID string, source Source, since time.Time, record *workflowRecord) ([]SourceItem, error) {
 	var rows []messageSourceRow
 	query := messageSourceQuery(s.db, workspaceID).
@@ -370,6 +373,25 @@ func (s *Service) admitMessageEvent(ctx context.Context, tx bun.Tx, record workf
 
 // A reviewed message that can no longer be sent ends its run with that reason,
 // so the reviewer sees why their approval did not produce a message.
+// messageRunStoppedDuringReview reports a run that a person's reply or an opt-out
+// cancelled while it waited for approval. Approving it finds that outcome, with its
+// reason, rather than a conflict the reviewer cannot act on.
+func messageRunStoppedDuringReview(record runRecord) (Run, bool) {
+	if record.State != StateCancelled {
+		return Run{}, false
+	}
+	run, err := decodeRun(record)
+	if err != nil {
+		return Run{}, false
+	}
+	for _, step := range run.Steps {
+		if step.StepID == record.CurrentStepID && isMessageAction(step.Kind) {
+			return run, true
+		}
+	}
+	return Run{}, false
+}
+
 func (s *Service) failReviewedMessageRun(ctx context.Context, actor workspaceaccess.ActorFacts, record runRecord, reason string) (Run, error) {
 	err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if err := organizationguard.LockWorkspace(ctx, tx, record.WorkspaceID); err != nil {

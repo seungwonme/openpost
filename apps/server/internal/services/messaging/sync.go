@@ -335,6 +335,17 @@ func (s *Service) storeProviderMessage(ctx context.Context, tx bun.IDB, account 
 	return inserted, nil
 }
 
+// storeHistoryMessage marks a message first stored from a history page, so that
+// reading back through a conversation cannot start a workflow.
+func (s *Service) storeHistoryMessage(ctx context.Context, tx bun.IDB, account models.SocialAccount, conversation models.Conversation, remote platform.ProviderMessage) error {
+	inserted, err := s.storeProviderMessage(ctx, tx, account, conversation.ID, conversation.CounterpartRemoteID, remote, s.now())
+	if err != nil || !inserted {
+		return err
+	}
+	_, err = tx.NewRaw(`INSERT INTO message_history_imports(message_id) SELECT id FROM direct_messages WHERE conversation_id = ? AND remote_message_id = ? ON CONFLICT DO NOTHING`, conversation.ID, remote.ID).Exec(ctx)
+	return err
+}
+
 func insertProviderMessage(ctx context.Context, db bun.IDB, account models.SocialAccount, conversationID string, remote platform.ProviderMessage, now time.Time) (bool, error) {
 	if remote.ID == "" {
 		return false, nil

@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -448,4 +449,31 @@ func TestCommentTakeoverStopsAQueuedFollowUpInTheSendFence(t *testing.T) {
 	stopped := f.advanceSequence(t, in)
 	assert.Equal(t, SequenceStopped, stopped.State)
 	assert.Equal(t, stopReasonComment, stopped.Reason)
+}
+
+// One person sends six short messages to a five message sequence. The first runs
+// to completion, the rest find the hour full, and only five go out.
+func TestSixShortMessagesGetOneSequence(t *testing.T) {
+	f := newAutomationFixture(t)
+	messages := []SequenceMessage{{Text: "1"}, {Text: "2"}, {Text: "3"}, {Text: "4"}, {Text: "5"}}
+	for trigger := range 6 {
+		id, run := fmt.Sprintf("short-%d", trigger), fmt.Sprintf("run-%d", trigger)
+		f.receive(t, id, *f.now)
+		f.seedRun(t, run, "workflow")
+		in := f.sequenceRequest()
+		in.TriggerMessageID, in.RunID, in.Messages = id, run, messages
+		for range 7 {
+			progress := f.advanceSequence(t, in)
+			if progress.State != AutomationSending {
+				if trigger > 0 {
+					// A full hour is a policy stop, and it shows its reason as well.
+					require.Contains(t, []string{AutomationSkipped, SequenceStopped}, progress.State, "trigger %d", trigger)
+					require.NotEmpty(t, progress.Reason)
+				}
+				break
+			}
+			require.NoError(t, f.runSendJob(t, progress.Reply.MessageID))
+		}
+	}
+	require.Equal(t, 5, *f.sends)
 }

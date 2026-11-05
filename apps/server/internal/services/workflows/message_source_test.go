@@ -461,32 +461,41 @@ func (f *messageSourceFixture) parkedWake(t *testing.T) time.Time {
 	return wake
 }
 
+func eachMessageBackend(t *testing.T, test func(*testing.T, *messageSourceFixture)) {
+	t.Helper()
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) { test(t, newMessageSourceFixture(t, backend)) })
+	}
+}
+
 func TestRunsWaitingForAResponseDoNotHoldTheActiveRunLimit(t *testing.T) {
-	f := newMessageSourceFixture(t, "sqlite")
-	workflow := f.publish(t, messageSource(), nil)
-	f.parkedRun(t, workflow.ID, f.now.Add(7*24*time.Hour))
-	count, err := countActiveRuns(t.Context(), f.s.db, "ws")
-	require.NoError(t, err)
-	assert.Zero(t, count)
+	eachMessageBackend(t, func(t *testing.T, f *messageSourceFixture) {
+		workflow := f.publish(t, messageSource(), nil)
+		f.parkedRun(t, workflow.ID, f.now.Add(7*24*time.Hour))
+		count, err := countActiveRuns(t.Context(), f.s.db, "ws")
+		require.NoError(t, err)
+		assert.Zero(t, count)
+	})
 }
 
 func TestBatchedCheckWakesOnlyRunsWithSomethingToDo(t *testing.T) {
-	f := newMessageSourceFixture(t, "sqlite")
-	workflow := f.publish(t, messageSource(), nil)
-	far := f.now.Add(7 * 24 * time.Hour).Truncate(time.Second)
-	f.parkedRun(t, workflow.ID, far)
+	eachMessageBackend(t, func(t *testing.T, f *messageSourceFixture) {
+		workflow := f.publish(t, messageSource(), nil)
+		far := f.now.Add(7 * 24 * time.Hour).Truncate(time.Second)
+		f.parkedRun(t, workflow.ID, far)
 
-	require.NoError(t, f.s.wakeRespondedRuns(t.Context(), f.now.Add(time.Minute)))
-	assert.WithinDuration(t, far, f.parkedWake(t), time.Second, "nothing happened")
+		require.NoError(t, f.s.wakeRespondedRuns(t.Context(), f.now.Add(time.Minute)))
+		assert.WithinDuration(t, far, f.parkedWake(t), time.Second, "nothing happened")
 
-	f.message(t, models.DirectMessage{ID: "older", AuthorRemoteID: "reader", Body: "hi", RemoteCreatedAt: f.now.Add(-time.Hour)})
-	require.NoError(t, f.s.wakeRespondedRuns(t.Context(), f.now.Add(time.Minute)))
-	assert.WithinDuration(t, far, f.parkedWake(t), time.Second, "a message from before the private reply is not a response")
+		f.message(t, models.DirectMessage{ID: "older", AuthorRemoteID: "reader", Body: "hi", RemoteCreatedAt: f.now.Add(-time.Hour)})
+		require.NoError(t, f.s.wakeRespondedRuns(t.Context(), f.now.Add(time.Minute)))
+		assert.WithinDuration(t, far, f.parkedWake(t), time.Second, "a message from before the private reply is not a response")
 
-	f.message(t, models.DirectMessage{ID: "response", AuthorRemoteID: "reader", Body: "hi", RemoteCreatedAt: f.now.Add(time.Minute)})
-	wakeAt := f.now.Add(2 * time.Minute)
-	require.NoError(t, f.s.wakeRespondedRuns(t.Context(), wakeAt))
-	assert.WithinDuration(t, wakeAt, f.parkedWake(t), time.Second)
+		f.message(t, models.DirectMessage{ID: "response", AuthorRemoteID: "reader", Body: "hi", RemoteCreatedAt: f.now.Add(time.Minute)})
+		wakeAt := f.now.Add(2 * time.Minute)
+		require.NoError(t, f.s.wakeRespondedRuns(t.Context(), wakeAt))
+		assert.WithinDuration(t, wakeAt, f.parkedWake(t), time.Second)
+	})
 }
 
 func TestBatchedCheckWakesARunThatMustStop(t *testing.T) {
@@ -501,37 +510,55 @@ func TestBatchedCheckWakesARunThatMustStop(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := newMessageSourceFixture(t, "sqlite")
-			workflow := f.publish(t, messageSource(), nil)
-			f.parkedRun(t, workflow.ID, f.now.Add(7*24*time.Hour))
-			stop(t, f)
-			wakeAt := f.now.Add(time.Minute)
-			require.NoError(t, f.s.wakeRespondedRuns(t.Context(), wakeAt))
-			assert.WithinDuration(t, wakeAt, f.parkedWake(t), time.Second)
+			eachMessageBackend(t, func(t *testing.T, f *messageSourceFixture) {
+				workflow := f.publish(t, messageSource(), nil)
+				f.parkedRun(t, workflow.ID, f.now.Add(7*24*time.Hour))
+				stop(t, f)
+				wakeAt := f.now.Add(time.Minute)
+				require.NoError(t, f.s.wakeRespondedRuns(t.Context(), wakeAt))
+				assert.WithinDuration(t, wakeAt, f.parkedWake(t), time.Second)
+			})
 		})
 	}
 }
 
 func TestBatchedCheckClearsFinishedWaits(t *testing.T) {
-	f := newMessageSourceFixture(t, "sqlite")
-	workflow := f.publish(t, messageSource(), nil)
-	f.parkedRun(t, workflow.ID, f.now.Add(time.Hour))
-	_, err := f.s.db.NewRaw(`UPDATE workflow_runs SET state = 'cancelled' WHERE id = 'parked'`).Exec(t.Context())
-	require.NoError(t, err)
-	require.NoError(t, f.s.wakeRespondedRuns(t.Context(), f.now))
-	remaining, err := f.s.db.NewSelect().Table("message_sequence_waits").Count(t.Context())
-	require.NoError(t, err)
-	assert.Zero(t, remaining)
+	eachMessageBackend(t, func(t *testing.T, f *messageSourceFixture) {
+		workflow := f.publish(t, messageSource(), nil)
+		f.parkedRun(t, workflow.ID, f.now.Add(time.Hour))
+		_, err := f.s.db.NewRaw(`UPDATE workflow_runs SET state = 'cancelled' WHERE id = 'parked'`).Exec(t.Context())
+		require.NoError(t, err)
+		require.NoError(t, f.s.wakeRespondedRuns(t.Context(), f.now))
+		remaining, err := f.s.db.NewSelect().Table("message_sequence_waits").Count(t.Context())
+		require.NoError(t, err)
+		assert.Zero(t, remaining)
+	})
 }
 
 func TestTakeoverCancelsACommentRunWaitingForThatPerson(t *testing.T) {
-	f := newMessageSourceFixture(t, "sqlite")
-	workflow := f.publish(t, messageSource(), nil)
-	f.parkedRun(t, workflow.ID, f.now.Add(time.Hour))
-	require.NoError(t, f.s.db.RunInTx(t.Context(), nil, func(ctx context.Context, tx bun.Tx) error {
-		return f.s.CancelMessageAutomationRuns(ctx, tx, "ws", "c-reader", nil, "A person took over this conversation.")
-	}))
-	var state string
-	require.NoError(t, f.s.db.NewSelect().Model((*runRecord)(nil)).Column("state").Where("id = 'parked'").Scan(t.Context(), &state))
-	assert.Equal(t, StateCancelled, state)
+	eachMessageBackend(t, func(t *testing.T, f *messageSourceFixture) {
+		workflow := f.publish(t, messageSource(), nil)
+		f.parkedRun(t, workflow.ID, f.now.Add(time.Hour))
+		require.NoError(t, f.s.db.RunInTx(t.Context(), nil, func(ctx context.Context, tx bun.Tx) error {
+			return f.s.CancelMessageAutomationRuns(ctx, tx, "ws", "c-reader", nil, "A person took over this conversation.")
+		}))
+		var state string
+		require.NoError(t, f.s.db.NewSelect().Model((*runRecord)(nil)).Column("state").Where("id = 'parked'").Scan(t.Context(), &state))
+		assert.Equal(t, StateCancelled, state)
+	})
+}
+
+func TestMessageFirstStoredFromHistoryNeverStartsARun(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newMessageSourceFixture(t, backend)
+			workflow := f.publish(t, messageSource("GUIDE"), nil)
+			f.message(t, models.DirectMessage{ID: "imported", AuthorRemoteID: "reader", Body: "guide"})
+			_, err := f.s.db.NewRaw(`INSERT INTO message_history_imports(message_id) VALUES('imported')`).Exec(t.Context())
+			require.NoError(t, err)
+			f.message(t, models.DirectMessage{ID: "live", AuthorRemoteID: "reader", Body: "guide"})
+			require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+			assert.Equal(t, []string{"live"}, f.runSources(t, workflow.ID))
+		})
+	}
 }

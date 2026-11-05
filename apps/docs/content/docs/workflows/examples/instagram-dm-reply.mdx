@@ -24,7 +24,7 @@ Open **Workflows → Templates → Reply to Instagram keyword messages**. The dr
 
 Open **Configure** in the trigger to exclude keywords, choose whole-word, exact or contains matching, change the daily run limit, or adjust reply priority. Lower priority numbers answer first when several reply workflows match the same message, and only one replies. Equal priorities use the oldest workflow. A workflow that sends nothing can still run independently.
 
-Only messages created and first stored after activation start runs. Earlier messages, imported history, your own messages and messages from another account you connected do not. Reactivating a paused workflow starts with future messages again. New messages start a run within about five minutes.
+Only messages created and first stored after activation start runs. Earlier messages, messages first loaded by scrolling back through a conversation's history, your own messages and messages from another account you connected do not. Reactivating a paused workflow starts with future messages again. New messages start a run within about five minutes.
 
 ## Review or take over
 
@@ -50,10 +50,10 @@ A delay of 24 hours or more before a reply step fails when you publish, because 
 
 A short message asking to stop opts that person out of automatic messages from the account, and the opt-out also covers its comment automation. A message that opts out never starts a workflow. Capitalization, spacing, punctuation, and emoji are ignored.
 
-| Language | Recognized                                                                                                                                                                                                                                                                                                                                                        |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| English  | `stop`, alone or with `please`, `now`, `it` and similar words, and `stop` followed by `replying`, `messaging`, `texting`, `sending`, `contacting` or `dm`, such as `stop messaging me`. Any message of up to six words containing `unsubscribe`, `unsub`, `opt out`, `remove me`, `leave me alone`, `no more messages`, or `do not message`, `text` or `contact`. |
-| Korean   | Any message of up to 12 characters, not counting spaces, containing `그만`, such as `그만해요`, `그만 보내` or `이제 그만`. Words like `그만큼` and `그만두` do not count. Any message of up to 16 characters containing `수신거부`, `수신거절`, `수신취소`, `구독취소`, `구독해지`, `구독해제`, `보내지 마` or `연락하지 마`. `스탑` and `스톱` alone.           |
+| Language | Recognized                                                                                                                                                                                                                                                                                                                                                                         |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| English  | `stop` or `cancel`, alone or with `please`, `now`, `it` and similar words, and either followed by `replying`, `messaging`, `texting`, `sending`, `contacting` or `dm`, such as `stop messaging me`. Any message of up to six words containing `unsubscribe`, `unsub`, `opt out`, `remove me`, `leave me alone`, `no more messages`, or `do not message`, `text` or `contact`.      |
+| Korean   | Any message of up to 12 characters, not counting spaces, containing `그만`, such as `그만해요`, `그만 보내` or `이제 그만`. Words like `그만큼` and `그만두` do not count. Any message of up to 16 characters containing `수신거부`, `수신거절`, `수신취소`, `구독취소`, `구독해지`, `구독해제`, `보내지 마`, `연락하지 마` or `알림 꺼`. `스탑`, `스톱`, `거부` and `차단` alone. |
 
 Matching leans toward opting out, because a false match only silences automation for that person. `stop by the shop` and `don't stop` are not opt-outs.
 

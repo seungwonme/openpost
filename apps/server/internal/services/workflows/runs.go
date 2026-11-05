@@ -203,6 +203,9 @@ func (s *Service) Approve(ctx context.Context, actor workspaceaccess.ActorFacts,
 	if err := s.db.NewSelect().Model(&record).Where("id = ? AND workspace_id = ?", id, workspaceID).Scan(ctx); err != nil {
 		return Run{}, ErrNotFound
 	}
+	if stopped, ok := messageRunStoppedDuringReview(record); ok {
+		return stopped, nil
+	}
 	if record.State != StateApproval || record.Revision != expected {
 		return Run{}, ErrState
 	}
