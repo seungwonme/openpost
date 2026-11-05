@@ -2459,11 +2459,23 @@
 					"message_id": {
 						"type": "string"
 					},
+					"not_before": {
+						"format": "date-time",
+						"type": "string"
+					},
 					"reason": {
 						"type": "string"
 					},
 					"run_id": {
 						"type": "string"
+					},
+					"sequence_length": {
+						"format": "int64",
+						"type": "integer"
+					},
+					"sequence_position": {
+						"format": "int64",
+						"type": "integer"
 					},
 					"state": {
 						"type": "string"
@@ -2495,6 +2507,8 @@
 					"step_id",
 					"body",
 					"state",
+					"sequence_position",
+					"sequence_length",
 					"created_at",
 					"updated_at"
 				],
@@ -27424,6 +27438,7 @@
 							"private_comment_reply",
 							"comment_handoff",
 							"message_reply",
+							"message_sequence",
 							"wait",
 							"condition",
 							"metrics",

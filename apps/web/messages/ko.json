@@ -10396,5 +10396,22 @@
 	"workflows_message_failed": "메시지가 거부되었습니다. 추가로 보내지 않았습니다.",
 	"workflows_message_uncertain": "전달을 확인하지 못했습니다. OpenPost가 다시 보내지 않았습니다.",
 	"workflows_message_not_sent": "보내지 않음",
-	"workflows_message_approve": "메시지 승인"
+	"workflows_message_approve": "메시지 승인",
+	"workflows_message_sequence_node": "후속 메시지 보내기",
+	"workflows_message_sequence_help": "상대가 응답하면 그 응답 후 24시간 안에 메시지를 순서대로 보냅니다. 보낼 때마다 메시지 기간, 수신 거부, 직접 응대 여부를 다시 확인합니다.",
+	"workflows_message_sequence_messages": "후속 메시지",
+	"workflows_message_sequence_item": "메시지 {number}",
+	"workflows_message_sequence_position": "{total}개 중 {number}번째 메시지",
+	"workflows_message_sequence_delay": "지연 시간(분)",
+	"workflows_message_sequence_delay_help": "첫 지연은 상대의 응답부터, 이후 지연은 직전 메시지부터 계산합니다.",
+	"workflows_message_sequence_limits": "메시지를 1개에서 5개까지 추가합니다. 각 메시지에는 1,000바이트 이내의 내용과 24시간 미만의 분 단위 지연이 필요합니다.",
+	"workflows_message_sequence_add": "메시지 추가",
+	"workflows_message_sequence_remove": "메시지 삭제",
+	"workflows_message_sequence_up": "위로",
+	"workflows_message_sequence_down": "아래로",
+	"workflows_message_sequence_private": "후속 메시지 앞에는 이 경로에서 보내는 비공개 답장이 필요합니다.",
+	"workflows_message_sequence_source": "후속 메시지는 댓글 또는 수신 메시지 트리거에서만 쓸 수 있습니다.",
+	"workflows_message_sequence_once": "실행 하나는 메시지 하나에 한 번만 답합니다. 경로마다 답장이나 후속 메시지를 하나만 쓰세요.",
+	"workflows_message_response_window": "응답 대기 시간(분, 최대 7일)",
+	"workflows_message_scheduled": "{time}에 보낼 예정"
 }

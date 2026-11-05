@@ -340,6 +340,9 @@ func previewOutput(step Step, inputs map[string]any) map[string]any {
 		output["message_id"] = inputs["message_id"]
 		output["text"] = inputs["text"]
 		output["status"] = "preview"
+	case KindMessageSequence:
+		output["message_id"] = inputs["message_id"]
+		output["status"] = "preview"
 	case KindReply:
 		output["rendition_id"] = inputs["rendition_id"]
 		output["status"] = "queued"

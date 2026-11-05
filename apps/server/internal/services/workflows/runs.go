@@ -353,7 +353,7 @@ func (s *Service) approveCommentReply(ctx context.Context, actor workspaceaccess
 	if effect.Stop {
 		return s.Cancel(ctx, actor, workspaceID, id, expected)
 	}
-	step.Inputs["text"] = effect.Output["text"]
+	keepReviewedText(&step, effect)
 	step.Output = effect.Output
 	step.State = StateQueued
 	run.Steps[index] = step

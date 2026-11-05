@@ -53,8 +53,10 @@ checkout can move or be renamed without starting on an empty volume.
 | `apps/docs/content/docs/self-hosting/macbook-macmini.mdx` | Mac mini runbook |
 | `apps/server/internal/services/trackedlinks/` | Tracked redirect links (`/go/:slug`) |
 | `apps/server/internal/database/migrations/9003_message_automation.sql` | Instagram DM automation receipts and takeovers |
+| `apps/server/internal/database/migrations/9004_message_automation_sequences.sql` | Instagram DM follow-up positions on the same receipts |
 | `apps/server/internal/services/messaging/automation*.go` | Instagram DM automation: claim, dispatch checks, opt-out, takeover |
 | `apps/server/internal/services/workflows/message_sources.go` | `message_received` source and `message_reply` validation |
+| `apps/server/internal/services/engagement/automation_followup.go`, `apps/server/internal/services/workflows/message_sequence.go`, `apps/server/internal/api/handlers/workflow_message_sequence.go` | DM follow-up sequences: private reply anchor, validation, workflow effect |
 | `apps/server/internal/api/handlers/message_automation.go`, `workflow_message_actions.go` | DM automation routes and workflow effects |
 | `apps/web/src/lib/workflows/message-*`, `apps/web/src/lib/query/message-automation.ts`, `packages/query-catalog/src/message-automation.ts` | DM automation editor fields, review and takeover panel |
 | `apps/docs/content/docs/workflows/examples/instagram-dm-reply.mdx` | DM automation guide |

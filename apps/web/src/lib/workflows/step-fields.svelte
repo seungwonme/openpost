@@ -6,6 +6,7 @@
 	import CurlImport from './curl-import.svelte';
 	import { Label } from '$lib/components/ui/label';
 	import Destinations from './destinations.svelte';
+	import MessageSequenceFields from './message-sequence-fields.svelte';
 	import type { SocialAccount } from '@openpost/query-catalog';
 	import { m } from '$lib/paraglide/messages';
 	let {
@@ -62,6 +63,7 @@
 			references={field.code ? [] : references}
 			onchange={(value) => oninput(field.key, value)}
 		/>{/each}
+	{#if step.kind === 'message_sequence'}<MessageSequenceFields {step} {readonly} {oninput} />{/if}
 	{#if step.kind === 'code'}<p class="text-xs leading-5 text-muted-foreground">
 			{m.workflows_code_hint()}
 		</p>{/if}

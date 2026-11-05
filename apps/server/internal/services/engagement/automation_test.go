@@ -300,3 +300,24 @@ func TestTakeoverAfterPrivateAcceptanceCancelsRemainingWorkflow(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "sent", receipts[0].State)
 }
+
+func TestRunPrivateReplyIsOnlyADeliveredReplyFromThisRun(t *testing.T) {
+	s, in, _ := campaignTest(t)
+	_, err := s.RunPrivateReply(t.Context(), in.Authority, "run", "c")
+	require.ErrorIs(t, err, ErrNoDeliveredPrivateReply, "nothing was sent yet")
+	reply, err := s.AdvanceAutomationReply(t.Context(), in)
+	require.NoError(t, err)
+	_, err = s.RunPrivateReply(t.Context(), in.Authority, "run", "c")
+	require.ErrorIs(t, err, ErrNoDeliveredPrivateReply, "a queued reply has not reached anyone")
+	completeCampaignJob(t, s, reply.JobID)
+	reply, err = s.AdvanceAutomationReply(t.Context(), in)
+	require.NoError(t, err)
+	require.Equal(t, "sent", reply.State)
+	delivered, err := s.RunPrivateReply(t.Context(), in.Authority, "run", "c")
+	require.NoError(t, err)
+	require.Equal(t, "a", delivered.AccountID)
+	require.Equal(t, "reader", delivered.AuthorRemoteID)
+	require.Equal(t, reply.UpdatedAt, delivered.SentAt)
+	_, err = s.RunPrivateReply(t.Context(), in.Authority, "other-run", "c")
+	require.ErrorIs(t, err, ErrNoDeliveredPrivateReply)
+}

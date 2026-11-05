@@ -68,6 +68,27 @@ export function stepFields(kind: Step['kind'], inputs?: Step['inputs']): FieldSp
 				]
 			})
 		],
+		message_sequence: () => [
+			inputs?.engagement_id
+				? field('engagement_id', m.workflows_comment_id(), required)
+				: field('message_id', m.workflows_message_id(), required),
+			field('delivery', m.workflows_comment_delivery(), {
+				...required,
+				options: [
+					{ value: 'review', label: m.workflows_comment_review() },
+					{ value: 'automatic', label: m.workflows_comment_automatic() }
+				]
+			}),
+			...(inputs?.engagement_id
+				? [
+						field('response_window_minutes', m.workflows_message_response_window(), {
+							numeric: true,
+							min: 1,
+							max: 10080
+						})
+					]
+				: [])
+		],
 		comment_handoff: () => [field('engagement_id', m.workflows_comment_id(), required)],
 		private_comment_reply: () => [
 			field('engagement_id', m.workflows_comment_id(), required),
@@ -272,6 +293,16 @@ const outputs = {
 	tracking_link: ['url'],
 	schedule: ['publication_id', 'job_id', 'scheduled_at', 'status', 'renditions'],
 	message_reply: ['message_id', 'conversation_id', 'status', 'text', 'reason', 'sent_message_id'],
+	message_sequence: [
+		'message_id',
+		'conversation_id',
+		'status',
+		'text',
+		'reason',
+		'sent_message_id',
+		'sent',
+		'total'
+	],
 	comment_handoff: ['engagement_id', 'status'],
 	private_comment_reply: ['engagement_id', 'job_id', 'status', 'text', 'channel'],
 	comment_reply: ['engagement_id', 'job_id', 'status', 'text', 'channel'],

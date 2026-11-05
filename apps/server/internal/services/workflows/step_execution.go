@@ -160,6 +160,9 @@ func (s *Service) evaluateNativeStep(ctx context.Context, record runRecord, auth
 		progress.remaining = remaining
 	case effect.Pending:
 		wake := time.Now().UTC().Add(5 * time.Second)
+		if effect.WakeAt != nil {
+			wake = *effect.WakeAt
+		}
 		progress.state = StateWaiting
 		progress.wakeAt = &wake
 		progress.remaining = remaining

@@ -63,6 +63,10 @@ type AutomationMessage struct {
 	State            string    `json:"state"`
 	Reason           string    `json:"reason,omitempty"`
 	MessageID        string    `json:"message_id,omitempty"`
+	SequencePosition int       `json:"sequence_position"`
+	SequenceLength   int       `json:"sequence_length"`
+	NotBefore        time.Time `bun:",nullzero" json:"not_before,omitzero"`
+	CommentItemID    string    `json:"-"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -182,7 +186,7 @@ func (s *Service) loadAutomationTrigger(ctx context.Context, tx bun.Tx, in Autom
 
 func (s *Service) claimAutomationReply(ctx context.Context, tx bun.Tx, trigger models.DirectMessage, conversation models.Conversation, in AutomationRequest) (AutomationMessage, error) {
 	var reply AutomationMessage
-	err := tx.NewSelect().Model(&reply).Where("trigger_message_id = ?", trigger.ID).Scan(ctx)
+	err := tx.NewSelect().Model(&reply).Where("trigger_message_id = ? AND sequence_position = 0", trigger.ID).Scan(ctx)
 	if err == nil {
 		if reply.RunID != in.RunID || reply.StepID != in.StepID {
 			// Answered by another owner. Report it without touching that receipt.
@@ -223,7 +227,7 @@ func (s *Service) advanceClaimedReply(ctx context.Context, tx bun.Tx, trigger mo
 	if reply.State == AutomationSending {
 		return s.reconcileAutomationDelivery(ctx, tx, reply)
 	}
-	check, err := s.automationStopCheck(ctx, tx, conversation, trigger)
+	check, err := s.automationReplyStopCheck(ctx, tx, conversation, trigger, *reply)
 	if err != nil {
 		return err
 	}
@@ -237,6 +241,20 @@ func (s *Service) advanceClaimedReply(ctx context.Context, tx bun.Tx, trigger mo
 		}
 		return nil
 	}
+	if reply.State == AutomationScheduled {
+		if s.now().Before(reply.NotBefore) {
+			return nil
+		}
+		reply.State = AutomationReady
+		if in.Delivery == "review" {
+			reply.State = AutomationAwaitingReview
+			return s.saveAutomationReply(ctx, tx, reply)
+		}
+	}
+	return s.deliverClaimedReply(ctx, tx, conversation, in, reply)
+}
+
+func (s *Service) deliverClaimedReply(ctx context.Context, tx bun.Tx, conversation models.Conversation, in AutomationRequest, reply *AutomationMessage) error {
 	body := strings.TrimSpace(in.Body)
 	switch {
 	case reply.State == AutomationAwaitingReview && in.Approve:
@@ -311,7 +329,7 @@ func automatedBodyIssue(body string) string {
 }
 
 func (s *Service) automationLooping(ctx context.Context, db bun.IDB, conversationID string) (bool, error) {
-	count, err := db.NewSelect().Model((*AutomationMessage)(nil)).Where("conversation_id = ? AND state IN (?) AND created_at >= ?", conversationID, bun.List([]string{AutomationSending, AutomationSent, AutomationUncertain}), s.now().Add(-time.Hour)).Count(ctx)
+	count, err := db.NewSelect().Model((*AutomationMessage)(nil)).Where("conversation_id = ? AND sequence_position = 0 AND state IN (?) AND created_at >= ?", conversationID, bun.List([]string{AutomationSending, AutomationSent, AutomationUncertain}), s.now().Add(-time.Hour)).Count(ctx)
 	return count >= maxAutomatedRepliesPerHour, err
 }
 
@@ -384,6 +402,25 @@ func (s *Service) automationStopCheck(ctx context.Context, db bun.IDB, conversat
 	return automationStopResult{}, nil
 }
 
+// automationReplyStopCheck adds what one receipt must still satisfy: a follow-up
+// also needs its comment to stay automated and its response to stay within 24 hours.
+func (s *Service) automationReplyStopCheck(ctx context.Context, db bun.IDB, conversation models.Conversation, trigger models.DirectMessage, reply AutomationMessage) (automationStopResult, error) {
+	if reply.CommentItemID != "" {
+		reason, err := commentStopReason(ctx, db, reply.CommentItemID)
+		if err != nil || reason != "" {
+			return automationStopResult{reason: reason}, err
+		}
+	}
+	check, err := s.automationStopCheck(ctx, db, conversation, trigger)
+	if err != nil || check.reason != "" {
+		return check, err
+	}
+	if reply.SequenceLength > 0 && !s.now().Before(automationMessageTime(trigger).Add(sequenceResponseWindow)) {
+		return automationStopResult{reason: stopReasonWindow}, nil
+	}
+	return check, nil
+}
+
 // An outbound provider message that OpenPost automation does not own was written
 // by a person, in Inbox or the Instagram app. An echo can be stored before its
 // send finalizes, so its body also identifies automation's own writes.
@@ -439,7 +476,7 @@ func (s *Service) checkAutomatedSend(ctx context.Context, db bun.IDB, message mo
 		}
 		return err
 	}
-	check, err := s.automationStopCheck(ctx, db, conversation, trigger)
+	check, err := s.automationReplyStopCheck(ctx, db, conversation, trigger, reply)
 	if err != nil {
 		return err
 	}
@@ -631,7 +668,7 @@ func (s *Service) StopWorkflowMessages(ctx context.Context, authority workspacea
 		if err := organizationguard.LockWorkspace(ctx, tx, authority.WorkspaceID); err != nil {
 			return err
 		}
-		query := tx.NewSelect().Model((*AutomationMessage)(nil)).Where("workspace_id = ? AND state IN (?)", authority.WorkspaceID, bun.List([]string{AutomationAwaitingReview, AutomationReady, AutomationSending}))
+		query := tx.NewSelect().Model((*AutomationMessage)(nil)).Where("workspace_id = ? AND state IN (?)", authority.WorkspaceID, bun.List([]string{AutomationScheduled, AutomationAwaitingReview, AutomationReady, AutomationSending}))
 		if workflowID != "" {
 			query = query.Where("workflow_id = ?", workflowID)
 		} else {

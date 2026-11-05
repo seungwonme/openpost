@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -189,6 +190,63 @@ func replyStep() Step {
 
 func waitStep(id string, minutes any) Step {
 	return Step{ID: id, Kind: KindWait, Name: "Wait", Inputs: map[string]Value{"minutes": literal(minutes)}}
+}
+
+func sequenceStep(messages any, inputs map[string]Value) Step {
+	step := Step{ID: "sequence", Kind: KindMessageSequence, Name: "Follow up", Inputs: map[string]Value{"messages": literal(messages), "delivery": literal("review")}}
+	for name, value := range inputs {
+		step.Inputs[name] = value
+	}
+	return step
+}
+
+func TestMessageSequenceValidation(t *testing.T) {
+	message := messageSource()
+	comment := Source{Kind: "comment_received", AccountIDs: []string{"ig"}, Keywords: []string{"guide"}, MatchMode: "word", DailyLimit: 20}
+	private := Step{ID: "private", Kind: KindPrivateReply, Name: "Private", Inputs: map[string]Value{"engagement_id": reference("source.engagement_id"), "text": literal("Hi"), "delivery": literal("review")}}
+	fromMessage := map[string]Value{"message_id": reference("source.message_id")}
+	fromComment := map[string]Value{"engagement_id": reference("source.engagement_id")}
+	two := `[{"text":"One","delay_minutes":0},{"text":"Two","delay_minutes":60}]`
+	cases := []struct {
+		name   string
+		source Source
+		steps  []Step
+		want   string
+	}{
+		{"answers the triggering message", message, []Step{sequenceStep(two, fromMessage)}, ""},
+		{"accepts a stored list", message, []Step{sequenceStep([]any{map[string]any{"text": "One", "delay_minutes": float64(5)}}, fromMessage)}, ""},
+		{"continues a private reply", comment, []Step{private, sequenceStep(two, fromComment)}, ""},
+		{"needs an earlier private reply", comment, []Step{sequenceStep(two, fromComment)}, "private reply earlier"},
+		{"a private reply on one branch is not enough", comment, []Step{{ID: "branch", Kind: KindCondition, Name: "If", Inputs: map[string]Value{"left": literal("a"), "operator": literal("equals"), "right": literal("a")}, Then: []Step{private}}, sequenceStep(two, fromComment)}, "private reply earlier"},
+		{"cannot target another message", message, []Step{sequenceStep(two, map[string]Value{"message_id": literal("someone-else")})}, "started this run"},
+		{"cannot target another comment", comment, []Step{private, sequenceStep(two, map[string]Value{"engagement_id": literal("someone-else")})}, "started this run"},
+		{"no other trigger can start one", Source{Kind: "manual"}, []Step{sequenceStep(two, fromMessage)}, "comment or incoming message"},
+		{"delays that outlast the window", message, []Step{sequenceStep(`[{"text":"One","delay_minutes":800},{"text":"Two","delay_minutes":800}]`, fromMessage)}, "24 hour"},
+		{"an earlier wait counts for a message trigger", message, []Step{waitStep("wait", 1000), sequenceStep(`[{"text":"One","delay_minutes":500}]`, fromMessage)}, "24 hour"},
+		{"a wait before a comment's response does not count", comment, []Step{private, waitStep("wait", 1000), sequenceStep(`[{"text":"One","delay_minutes":500}]`, fromComment)}, ""},
+		{"one delay at the window", message, []Step{sequenceStep(`[{"text":"One","delay_minutes":1440}]`, fromMessage)}, "under 24 hours"},
+		{"a negative delay", message, []Step{sequenceStep(`[{"text":"One","delay_minutes":-1}]`, fromMessage)}, "under 24 hours"},
+		{"a fractional delay", message, []Step{sequenceStep(`[{"text":"One","delay_minutes":1.5}]`, fromMessage)}, "whole-minute"},
+		{"empty text", message, []Step{sequenceStep(`[{"text":"  "}]`, fromMessage)}, "needs text"},
+		{"text over the byte limit", message, []Step{sequenceStep([]any{map[string]any{"text": strings.Repeat("가", 334)}}, fromMessage)}, "byte limit"},
+		{"no messages", message, []Step{sequenceStep(`[]`, fromMessage)}, "between 1 and 5"},
+		{"too many messages", message, []Step{sequenceStep(`[{"text":"1"},{"text":"2"},{"text":"3"},{"text":"4"},{"text":"5"},{"text":"6"}]`, fromMessage)}, "between 1 and 5"},
+		{"delivery is chosen directly", message, []Step{sequenceStep(two, map[string]Value{"message_id": reference("source.message_id"), "delivery": literal("broadcast")})}, "review or automatic"},
+		{"the response window is bounded", comment, []Step{private, sequenceStep(two, map[string]Value{"engagement_id": reference("source.engagement_id"), "response_window_minutes": literal(10081)})}, "7 days"},
+		{"a run answers once", message, []Step{replyStep(), sequenceStep(two, fromMessage)}, "answers one message once"},
+		{"unknown fields are rejected", message, []Step{sequenceStep(two, map[string]Value{"message_id": reference("source.message_id"), "tag": literal("HUMAN_AGENT")})}, "unsupported follow-up field"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			err := Validate(Definition{Schema: 1, Source: test.source, Steps: test.steps}, true)
+			if test.want == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, test.want)
+			require.ErrorIs(t, err, ErrInvalid)
+		})
+	}
 }
 
 func TestMessageReplyValidation(t *testing.T) {

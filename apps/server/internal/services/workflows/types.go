@@ -105,7 +105,7 @@ type WorkflowValue struct {
 
 type WorkflowStep struct {
 	ID     string           `json:"id" maxLength:"64"`
-	Kind   string           `json:"kind" enum:"create_draft,build_draft,approval,schedule,reply,comment_reply,private_comment_reply,comment_handoff,message_reply,wait,condition,metrics,http_request,code,ai_text,ai_decision,set_fields,text,parse_json,list_filter,list_sort,list_limit,merge,date,tracking_link,read_feed"`
+	Kind   string           `json:"kind" enum:"create_draft,build_draft,approval,schedule,reply,comment_reply,private_comment_reply,comment_handoff,message_reply,message_sequence,wait,condition,metrics,http_request,code,ai_text,ai_decision,set_fields,text,parse_json,list_filter,list_sort,list_limit,merge,date,tracking_link,read_feed"`
 	Name   string           `json:"name" maxLength:"100"`
 	Inputs map[string]Value `json:"inputs"`
 	Then   []Step           `json:"then,omitempty" maxItems:"40"`
@@ -191,6 +191,8 @@ type EffectResult struct {
 	// Pending returns control to the database queue while a native durable
 	// operation finishes. Repeating the effect uses the same run/step identity.
 	Pending bool
+	// WakeAt overrides the short poll when the operation is waiting on a known time.
+	WakeAt *time.Time
 }
 
 type Actions interface {

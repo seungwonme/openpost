@@ -50,4 +50,15 @@ People who send `STOP`, `unsubscribe`, `stop replying`, `그만` or `수신거�
 
 Failed and unconfirmed sends remain inspectable. OpenPost does not repeat a send when the outcome is uncertain. One message gets at most one automatic reply, even if Meta delivers its webhook twice. A conversation that receives five automatic replies in an hour stops receiving them until the hour passes.
 
+## Send follow-up messages
+
+Add **Send follow-up messages** to send up to five ordered messages, each with its own delay. It works in two places:
+
+- After **Instagram message received**, the sequence answers the message that started the run.
+- After **Private comment reply**, the sequence waits for the person to respond in a direct message, then answers that response. A private reply is one message and does not open a conversation, so nothing further is sent until they respond. If no response arrives before the time you set, up to seven days, the run ends without sending and shows why.
+
+The first delay counts from the person's response. Later delays count from the previous message. Every message must go out within 24 hours of that response, even if the person writes again. Delays that add up to 24 hours or more fail when you publish.
+
+OpenPost repeats the checks above before each message and also stops if someone takes over the comment. When a check fails, or a message fails or has an unconfirmed outcome, the sequence stops, nothing further is sent, and the run shows the reason. With review delivery, each message waits for its own approval when it is due. If approval comes too late, the message is not sent.
+
 See [Meta's messaging documentation](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api) for provider requirements. This workflow does not include follower gates, email capture or broadcasts.
