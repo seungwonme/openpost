@@ -6,3 +6,4 @@
 - Show messages held back by the per-person and daily limits.
 - Keep order questions and phone notification reports out of opt-out handling, and ignore refusals older than 30 days found in history.
 - Answer a new message first read from history while its delivery is late.
+- Honor a new comment or message refusal after an opt-out was removed, including Instagram's time format and a missing time.

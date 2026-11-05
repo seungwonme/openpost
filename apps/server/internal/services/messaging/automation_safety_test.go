@@ -230,6 +230,7 @@ func TestOptOutTiers(t *testing.T) {
 			"opt out", "optout", "opt me out", "unsub", "unsubscribe me", "do not message me", "don't message me", "dont text me", "no more messages", "leave me alone", "remove me",
 			"그만", "그만!", "그만 해", "그만해", "그만 해요", "그만해요", "그만요", "그만 해주세요", "그만해주세요", "그만해줘", "그만보내", "그만 보내", "그만 보내요", "그만 보내줘", "그만 보내세요", "그만 보내주세요", "이제 그만", "제발 그만해 🙏", "그만 좀", "그만 🙏", "메시지 그만 보내주세요",
 			"보내지 마세요", "보내지마", "보내지 마", "보내지 말아주세요", "연락하지 마세요", "메시지 보내지 마세요",
+			"연락 주지 마세요", "연락주지마", "연락 주지 마", "연락 주지 마요", "연락 주지 말아주세요", "연락 마세요", "연락 말아주세요", "제발 연락 주지 마세요", "문자 주지 마세요", "메시지 주지 마세요", "메세지 주지 마세요", "디엠 주지 마세요",
 			"수신거부", "수신 거부", "수신거부합니다", "수신거부요", "수신 거부 합니다", "수신 거부할게요", "수신거절", "구독취소", "구독 취소", "구독취소요", "구독 해지", "스탑", "스톱",
 		},
 		optOutPossible: {
@@ -238,13 +239,18 @@ func TestOptOutTiers(t *testing.T) {
 			"stop?", "그만?", "수신거부요?", "unsubscribe?", "could you please stop messaging me", "stop the music", "when do you stop serving lunch", "unsubscribe me from the other list",
 			"cancel", "Cancel it", "please cancel it", "cancel it please", "cancel this", "cancel all", "cancel please", "cancel?", "거부", "차단", "차단합니다", "제발 차단", "알림 꺼주세요", "알림 끄는 법", "알림 끄면 못 받나요",
 			"stop this", "stop all", "stop me", "stop to", "stop text",
-			"제 친구가 수신거부를 어떻게 하는지 물어봐서요 혹시 아시나요", "어제 받은 메시지가 너무 좋아서 이제 그만 고민하고 바로 결제하려고 합니다",
+			"please cancel", "연락 주지 말고 문자로 해주세요", "아직 연락 주지 마세요", "연락 안 주셔도 돼요", "수신거부 했는데 왜 또 오죠",
 		},
 		optOutNone: {
 			"", "   ", "❤️", "stop by the shop", "don't stop", "can't stop", "non stop", "stop sign", "bus stop", "guide please", "hello",
 			"그만큼 좋아요", "그만두셨나요", "그만한 가격이면 살게요", "가이드 보내주세요", "구독 어떻게 하나요", "안녕하세요", "버스탑승 안내", "거부권이 뭔가요", "차단기 가격",
 			"주문 취소 cancel 가능한가요", "차단 해제 어떻게 해요", "차단 어떻게 풀어요", "cancel my order", "cancel my order please", "can i cancel", "cancel to", "cancel send", "취소", "취소해주세요",
 			"차단됐어요", "차단 당했어요", "거부 당했어요", "카드 거부", "결제 거부",
+			"next stop is seoul", "the last stop was great", "i love your bus stop photo", "we got off at the wrong stop",
+			"thanks for the guide, we took the train and got off at the wrong stop but it was fine and we will be back next year with friends",
+			"i read your guide last night and it helped so much that i could not stop reading it again and again",
+			"제 친구가 수신거부를 어떻게 하는지 물어봐서요 혹시 아시나요", "어제 받은 메시지가 너무 좋아서 이제 그만 고민하고 바로 결제하려고 합니다",
+			"연락 안 와요",
 			"알림 꺼졌어요", "알림 꺼져서 못봤어요", "알림 꺼놨어요", "카톡 알림 꺼놨어요", "알림꺼짐", "알림 꺼둘게요", "알림 꺼뒀어요", "알림이 꺼져있어요",
 		},
 	}
@@ -256,7 +262,8 @@ func TestOptOutTiers(t *testing.T) {
 }
 
 func TestOrdinaryOrderMessagesLeaveAutomationRunning(t *testing.T) {
-	for i, body := range []string{"주문 취소 cancel 가능한가요", "차단 해제 어떻게 해요", "cancel my order", "can i cancel", "알림 꺼져서 못봤어요"} {
+	for i, body := range []string{"주문 취소 cancel 가능한가요", "차단 해제 어떻게 해요", "cancel my order", "can i cancel", "알림 꺼져서 못봤어요", "next stop is seoul",
+		"thanks for the guide, we took the train and got off at the wrong stop but it was fine and we will be back next year with friends"} {
 		f := newAutomationFixture(t)
 		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", inboundEvent(fmt.Sprintf("mid.%d", i), body, *f.now)))
 		assert.False(t, f.optedOut(t), "%q", body)
@@ -332,6 +339,20 @@ func TestOperatorRemovesAnOptOut(t *testing.T) {
 		t.Helper()
 		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", inboundEvent(id, "STOP", at)))
 	}
+	t.Run("a new refusal with no provider time is honored, and its redelivery stays removed", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		stop(t, f, "mid.first", *f.now)
+		*f.now = f.now.Add(time.Hour)
+		require.NoError(t, f.s.RemoveConversationOptOut(t.Context(), f.actor, "workspace", "conversation"))
+		*f.now = f.now.Add(time.Hour)
+		stop(t, f, "mid.unknown", time.Time{})
+		assert.True(t, f.optedOut(t), "wrongly honoring is the safe direction")
+		*f.now = f.now.Add(time.Hour)
+		require.NoError(t, f.s.RemoveConversationOptOut(t.Context(), f.actor, "workspace", "conversation"))
+		*f.now = f.now.Add(time.Hour)
+		stop(t, f, "mid.unknown", time.Time{})
+		assert.False(t, f.optedOut(t), "first stored before the removal, so this is the old message")
+	})
 	t.Run("records who and when, and a redelivery stays removed", func(t *testing.T) {
 		f := newAutomationFixture(t)
 		stop(t, f, "mid.stop", *f.now)
@@ -795,6 +816,16 @@ func TestHistoryIsNotNewWithNoKnownLastMessage(t *testing.T) {
 	marks, err := f.db.NewSelect().Table("message_history_imports").Count(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, 1, marks)
+}
+
+func TestPrivateReplyEchoByIDSpendsItsTextMatch(t *testing.T) {
+	f := newAutomationFixture(t)
+	f.seedPrivateReply(t, "sent", *f.now)
+	f.seedAttempt(t, "engagement:private", "private-job", "mid.private")
+	require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.private", "Your guide", f.now.Add(time.Second))))
+	require.False(t, f.takenOver(t), "the echo of the reply is not a person")
+	require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("person-copy", "Your guide", f.now.Add(2*time.Second))))
+	assert.True(t, f.takenOver(t), "a person repeating the text after its echo is a person")
 }
 
 func TestOnlyMessagesFirstStoredFromHistoryAreMarked(t *testing.T) {

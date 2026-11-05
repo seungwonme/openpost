@@ -53,14 +53,26 @@ func TestRemovalKeepsOlderRequestsRemoved(t *testing.T) {
 	require.NotNil(t, state.RemovedAt)
 	assert.Equal(t, "Sample editor", state.RemovedByName)
 
-	for name, requestedAt := range map[string]time.Time{"older": now.Add(-time.Hour), "unknown time": {}} {
-		recorded, err = Record(t.Context(), db, "ig", "reader", requestedAt, now)
-		require.NoError(t, err)
-		assert.False(t, recorded, name)
-	}
+	recorded, err = Record(t.Context(), db, "ig", "reader", now.Add(-time.Hour), now)
+	require.NoError(t, err)
+	assert.False(t, recorded, "an older request stays removed")
 	recorded, err = Record(t.Context(), db, "ig", "reader", now.Add(time.Minute), now.Add(time.Minute))
 	require.NoError(t, err)
 	assert.True(t, recorded, "a newer refusal counts")
+}
+
+func TestUnknownRequestTimeIsHonoredAfterARemoval(t *testing.T) {
+	db := optOutDB(t)
+	now := time.Now().UTC()
+	_, err := Record(t.Context(), db, "ig", "reader", now, now)
+	require.NoError(t, err)
+	require.NoError(t, db.RunInTx(t.Context(), nil, func(ctx context.Context, tx bun.Tx) error {
+		_, err := Remove(ctx, tx, "ws", "ig", "reader", "user", now.Add(time.Hour))
+		return err
+	}))
+	recorded, err := Record(t.Context(), db, "ig", "reader", time.Time{}, now.Add(2*time.Hour))
+	require.NoError(t, err)
+	assert.True(t, recorded, "wrongly honoring a refusal is the safe direction")
 }
 
 func TestRemovingNothingRecordsNothing(t *testing.T) {

@@ -586,16 +586,17 @@ func persistEngagementComment(
 			Exec(ctx)
 		return models.EngagementItem{}, false, err
 	}
-	if comment.AuthorID != "" && (strings.EqualFold(strings.TrimSpace(comment.Text), "stop") || strings.EqualFold(strings.TrimSpace(comment.Text), "unsubscribe") || strings.EqualFold(strings.TrimSpace(comment.Text), "stop replying")) {
-		requestedAt, _ := time.Parse(time.RFC3339, comment.CreatedAt)
-		if _, err := automationoptout.Record(ctx, tx, account.ID, comment.AuthorID, requestedAt, now); err != nil {
-			return models.EngagementItem{}, false, err
-		}
-	}
 	existing, existingErr := findEngagementIdentity(ctx, tx, account, comment.ID)
 	exists := existingErr == nil
 	if existingErr != nil && !errors.Is(existingErr, sql.ErrNoRows) {
 		return models.EngagementItem{}, false, existingErr
+	}
+	if comment.AuthorID != "" && (strings.EqualFold(strings.TrimSpace(comment.Text), "stop") || strings.EqualFold(strings.TrimSpace(comment.Text), "unsubscribe") || strings.EqualFold(strings.TrimSpace(comment.Text), "stop replying")) {
+		// Seeing a comment again keeps the time it was first stored, so it cannot undo a removal.
+		requestedAt := firstNonZeroTime(platform.ProviderTime(comment.CreatedAt), existing.RemoteCreatedAt, existing.CreatedAt)
+		if _, err := automationoptout.Record(ctx, tx, account.ID, comment.AuthorID, requestedAt, now); err != nil {
+			return models.EngagementItem{}, false, err
+		}
 	}
 	item := engagementItemFromComment(rendition, account, existing, comment, now)
 	err := saveEngagementItem(ctx, tx, item)

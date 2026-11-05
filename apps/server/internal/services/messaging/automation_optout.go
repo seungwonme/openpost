@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/openpost/backend/internal/models"
 	"github.com/openpost/backend/internal/platform"
@@ -38,6 +39,11 @@ const (
 	// does not create a permanent opt-out. Replaying history must not stop automation
 	// for someone who has said nothing about it in a month.
 	automationOptOutRecency = 30 * 24 * time.Hour
+
+	// A possible request holds the conversation until a person decides, so only a
+	// short message can be one. A long message that uses these words is about something else.
+	maxPossibleEnglishWords = 6
+	maxPossibleKoreanRunes  = 16
 )
 
 var (
@@ -50,14 +56,14 @@ var (
 	// word names something, such as an order, so it is ordinary business.
 	cancelCompanions = map[string]bool{"this": true, "that": true, "all": true, "me": true, "my": true, "subscription": true, "message": true, "messages": true, "msg": true, "msgs": true, "dm": true, "dms": true, "text": true, "texts": true}
 	// These are said to a person who is not being asked to stop anything.
-	englishOrdinaryStops   = []string{" stop by ", " don t stop ", " dont stop ", " do not stop ", " can t stop ", " cant stop ", " cannot stop ", " non stop ", " bus stop ", " stop sign "}
+	englishOrdinaryStops   = []string{" stop by ", " don t stop ", " dont stop ", " do not stop ", " can t stop ", " cant stop ", " cannot stop ", " non stop ", " bus stop ", " stop sign ", " next stop ", " last stop ", " first stop ", " wrong stop ", " my stop ", " your stop ", " a stop ", " the stop ", " pit stop ", " one stop ", " train stop ", " subway stop "}
 	englishPossibleWords   = map[string]bool{"stop": true, "unsubscribe": true, "unsub": true, "optout": true}
 	englishPossiblePhrases = []string{"opt out", "opt me out", "remove me", "leave me alone", "no more messages", "no more dms", "do not message", "do not text", "do not contact", "do not dm", "don t message", "don t text", "don t contact", "don t dm", "dont message", "dont text", "dont contact", "dont dm"}
 
 	koreanDefiniteOptOuts = koreanOptOutCommands()
 	koreanFillers         = []string{"제발", "이제", "좀"}
 	koreanObjects         = []string{"메시지", "메세지", "문자", "디엠", "dm", "연락"}
-	koreanPossiblePhrases = []string{"수신거부", "수신거절", "수신취소", "구독취소", "구독해지", "구독해제", "보내지마", "보내지말", "연락하지마", "연락하지말", "알림꺼", "알림끄"}
+	koreanPossiblePhrases = []string{"수신거부", "수신거절", "수신취소", "구독취소", "구독해지", "구독해제", "보내지마", "보내지말", "연락하지마", "연락하지말", "연락주지마", "연락주지말", "문자주지마", "문자주지말", "메시지주지마", "메시지주지말", "메세지주지마", "메세지주지말", "디엠주지마", "디엠주지말", "연락안주셔도", "연락안주셨으면", "연락안해주셔도", "연락안하셔도", "알림꺼", "알림끄"}
 	// These count only as the whole message: `카드 거부` and `차단 해제 어떻게 해요` are not about automation.
 	koreanPossibleWords = map[string]bool{"거부": true, "거부요": true, "거부합니다": true, "거부할게요": true, "차단": true, "차단요": true, "차단합니다": true, "차단할게요": true}
 	// These report a phone setting. They ask for nothing.
@@ -93,7 +99,7 @@ func koreanOptOutCommands() map[string]bool {
 	}
 	add([]string{"그만"}, []string{"", "요", "해", "해요", "해라", "해줘", "해줘요", "해주세요", "하세요", "하십시오", "보내", "보내요", "보내라", "보내줘", "보내줘요", "보내세요", "보내주세요", "보내십시오"})
 	add([]string{"수신거부", "수신거절", "수신취소", "구독취소", "구독해지", "구독해제"}, []string{"", "요", "합니다", "할게요", "해요", "해주세요", "해줘"})
-	add([]string{"보내지", "연락하지", "문자하지", "디엠하지"}, []string{"마", "마요", "마세요", "마십시오", "마라", "말아요", "말아주세요", "말아줘", "말아줘요"})
+	add([]string{"보내지", "연락하지", "문자하지", "디엠하지", "연락주지", "문자주지", "메시지주지", "메세지주지", "디엠주지", "연락"}, []string{"마", "마요", "마세요", "마십시오", "마라", "말아요", "말아주세요", "말아줘", "말아줘요"})
 	add(koreanStopWords, []string{"", "요", "해주세요"})
 	return commands
 }
@@ -170,6 +176,9 @@ func englishBareCancel(words []string) bool {
 }
 
 func englishMentionsStopping(words []string) bool {
+	if len(words) > maxPossibleEnglishWords {
+		return false
+	}
 	if englishBareCancel(words) {
 		return true
 	}
@@ -211,6 +220,9 @@ func koreanRefuses(compact string) bool {
 }
 
 func koreanMentionsStopping(words []string, compact string) bool {
+	if utf8.RuneCountInString(compact) > maxPossibleKoreanRunes {
+		return false
+	}
 	if koreanPossibleWords[withoutKoreanFillers(compact)] {
 		return true
 	}
@@ -251,7 +263,7 @@ func (s *Service) recordMessageOptOut(ctx context.Context, db bun.IDB, account m
 	case tier != optOutDefinite:
 		return nil
 	}
-	recorded, err := s.recordDefiniteOptOut(ctx, db, account, counterpart, message)
+	recorded, err := s.recordDefiniteOptOut(ctx, db, account, conversationID, counterpart, message)
 	if err != nil || !ok || !recorded {
 		return err
 	}
@@ -262,8 +274,20 @@ func (s *Service) recordMessageOptOut(ctx context.Context, db bun.IDB, account m
 	return s.cancelConversationRepliesTx(ctx, tx, conversation, stopReasonOptedOut)
 }
 
-func (s *Service) recordDefiniteOptOut(ctx context.Context, db bun.IDB, account models.SocialAccount, counterpart string, message platform.ProviderMessage) (bool, error) {
-	if !message.RemoteCreatedAt.IsZero() && s.now().Sub(message.RemoteCreatedAt) > automationOptOutRecency {
+func (s *Service) recordDefiniteOptOut(ctx context.Context, db bun.IDB, account models.SocialAccount, conversationID, counterpart string, message platform.ProviderMessage) (bool, error) {
+	requestedAt := message.RemoteCreatedAt
+	if requestedAt.IsZero() {
+		// With no provider time, first storage says how old the message is. This
+		// runs after the message is stored, so a new one is new.
+		stored, exists, err := findStoredMessage(ctx, db, conversationID, message.ID)
+		if err != nil {
+			return false, err
+		}
+		if exists {
+			requestedAt = stored.CreatedAt
+		}
+	}
+	if !requestedAt.IsZero() && s.now().Sub(requestedAt) > automationOptOutRecency {
 		return false, nil
 	}
 	recorded := false
@@ -271,7 +295,7 @@ func (s *Service) recordDefiniteOptOut(ctx context.Context, db bun.IDB, account 
 		if author == "" || author == account.AccountID {
 			continue
 		}
-		inserted, err := automationoptout.Record(ctx, db, account.ID, author, message.RemoteCreatedAt, s.now())
+		inserted, err := automationoptout.Record(ctx, db, account.ID, author, requestedAt, s.now())
 		if err != nil {
 			return false, err
 		}
