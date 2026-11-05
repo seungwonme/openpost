@@ -9,6 +9,7 @@ import (
 
 	"github.com/openpost/backend/internal/models"
 	"github.com/openpost/backend/internal/platform"
+	"github.com/uptrace/bun"
 )
 
 const (
@@ -72,9 +73,15 @@ func (s *Service) refreshConversation(ctx context.Context, conversation models.C
 		message.ConversationID = conversation.RemoteConversationID
 		deleted = append(deleted, message)
 	}
-	remote := platform.ProviderConversation{ID: conversation.RemoteConversationID, CounterpartRemoteID: conversation.CounterpartRemoteID, Messages: page.Messages}
-	window := provider.MessagingSupport().ReplyWindow
-	for _, message := range page.Messages {
+	remote := liveConversation(conversation, page.Messages, provider.MessagingSupport().ReplyWindow)
+	return s.ApplyProviderEvents(ctx, account.ID, platform.FetchMessageEventsResult{Conversations: []platform.ProviderConversation{remote}, DeletedMessages: deleted})
+}
+
+// liveConversation describes messages read from a conversation the way a delivery
+// describes them, so the conversation's position and window follow them.
+func liveConversation(conversation models.Conversation, messages []platform.ProviderMessage, window time.Duration) platform.ProviderConversation {
+	remote := platform.ProviderConversation{ID: conversation.RemoteConversationID, CounterpartRemoteID: conversation.CounterpartRemoteID, Messages: messages}
+	for _, message := range messages {
 		if message.RemoteCreatedAt.After(remote.LastMessageAt) {
 			remote.LastMessageAt, remote.LastMessagePreview, remote.LastRemoteMessageID = message.RemoteCreatedAt, message.Body, message.ID
 		}
@@ -82,7 +89,32 @@ func (s *Service) refreshConversation(ctx context.Context, conversation models.C
 			remote.ReplyWindowExpiresAt = message.RemoteCreatedAt.Add(window)
 		}
 	}
-	return s.ApplyProviderEvents(ctx, account.ID, platform.FetchMessageEventsResult{Conversations: []platform.ProviderConversation{remote}, DeletedMessages: deleted})
+	return remote
+}
+
+// storeLateDeliveries treats a message newer than anything the conversation knew
+// before the page was fetched as the delivery it is: its webhook is late, and it is
+// not history. Storing it as history would leave it unanswered with no reason shown,
+// because a later delivery finds it already stored. Without a known last message,
+// nothing on the page can be shown to be new.
+func (s *Service) storeLateDeliveries(ctx context.Context, tx bun.IDB, account models.SocialAccount, conversation models.Conversation, messages []platform.ProviderMessage) ([]receivedMessage, error) {
+	if account.Platform != "instagram" || conversation.LastMessageAt.IsZero() {
+		return nil, nil
+	}
+	late := []platform.ProviderMessage{}
+	for _, message := range messages {
+		if message.RemoteCreatedAt.After(conversation.LastMessageAt) {
+			late = append(late, message)
+		}
+	}
+	if len(late) == 0 {
+		return nil, nil
+	}
+	var window time.Duration
+	if provider := s.provider(account); provider != nil {
+		window = provider.MessagingSupport().ReplyWindow
+	}
+	return s.persistConversationsWithDB(ctx, tx, account, []platform.ProviderConversation{liveConversation(conversation, late, window)})
 }
 
 func (s *Service) holdAutomatedSend(ctx context.Context, message models.DirectMessage, conversation models.Conversation) error {

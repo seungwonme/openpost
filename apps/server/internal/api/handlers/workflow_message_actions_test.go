@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -32,8 +33,9 @@ type dmToken struct{}
 func (dmToken) GetValidAccessToken(context.Context, string) (string, error) { return "token", nil }
 
 type dmProvider struct {
-	sent *[]platform.SendMessageRequest
-	send func(platform.SendMessageRequest) (platform.SendMessageResult, error)
+	sent    *[]platform.SendMessageRequest
+	send    func(platform.SendMessageRequest) (platform.SendMessageResult, error)
+	history *[]platform.ProviderMessage
 }
 
 func (dmProvider) MessagingSupport() platform.MessagingSupport {
@@ -42,8 +44,11 @@ func (dmProvider) MessagingSupport() platform.MessagingSupport {
 func (dmProvider) FetchMessages(context.Context, string, platform.FetchMessagesRequest) (platform.FetchMessagesResult, error) {
 	return platform.FetchMessagesResult{}, nil
 }
-func (dmProvider) FetchMessageHistory(context.Context, string, platform.FetchMessageHistoryRequest) (platform.FetchMessageHistoryResult, error) {
-	return platform.FetchMessageHistoryResult{}, nil
+func (p dmProvider) FetchMessageHistory(context.Context, string, platform.FetchMessageHistoryRequest) (platform.FetchMessageHistoryResult, error) {
+	if p.history == nil {
+		return platform.FetchMessageHistoryResult{}, nil
+	}
+	return platform.FetchMessageHistoryResult{Messages: *p.history}, nil
 }
 func (p dmProvider) SendMessage(_ context.Context, _ string, request platform.SendMessageRequest) (platform.SendMessageResult, error) {
 	*p.sent = append(*p.sent, request)
@@ -223,6 +228,59 @@ func TestDMDelayedStepStopsWhenTheWindowClosesDuringAWait(t *testing.T) {
 	assert.Equal(t, workflows.StateFailed, run.State)
 	assert.Contains(t, run.Error, "messaging window closed")
 	assert.Empty(t, *h.sent)
+}
+
+func TestDMMessagesOverTheSenderLimitAreVisibleAndUnanswered(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmReplyStep("automatic")})
+	base := time.Now().UTC()
+	seen := map[string]bool{}
+	for i := range 7 {
+		require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent(fmt.Sprintf("mid.%d", i), "inbound", "reader", "guide", base.Add(time.Duration(i)*time.Second))))
+		h.poll(t)
+		for _, run := range h.runs(t) {
+			if seen[run.ID] || run.State != workflows.StateQueued {
+				continue
+			}
+			seen[run.ID] = true
+			h.advance(t, run.ID)
+			h.sendQueued(t)
+		}
+	}
+	assert.Len(t, *h.sent, 5)
+	runs := h.runs(t)
+	require.Len(t, runs, 7, "every message is accounted for")
+	limited := 0
+	for _, run := range runs {
+		if run.State == workflows.StateCancelled {
+			limited++
+			assert.Contains(t, run.Error, "daily limit")
+			assert.Empty(t, run.Steps, "no step ran")
+		}
+	}
+	assert.Equal(t, 2, limited)
+}
+
+func TestDMMessageFirstReadFromHistoryWhileItsWebhookIsLateIsAnswered(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmReplyStep("automatic")})
+	page := []platform.ProviderMessage{}
+	h.inbox.SetProvider("instagram", dmProvider{sent: h.sent, history: &page})
+	base := time.Now().UTC().Add(time.Second)
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.known", "inbound", "reader", "hello", base)))
+	page = []platform.ProviderMessage{
+		{ID: "mid.new", Direction: "inbound", AuthorRemoteID: "reader", Body: "guide", RemoteCreatedAt: base.Add(time.Second)},
+		{ID: "mid.older", Direction: "inbound", AuthorRemoteID: "reader", Body: "guide", RemoteCreatedAt: base.Add(-time.Millisecond)},
+	}
+	require.NoError(t, h.inbox.HandleJob(t.Context(), messaging.JobTypeMessagesSync, `{"id":"ig","conversation_id":"`+h.igConversation(t)+`"}`))
+	h.poll(t)
+	runs := h.runs(t)
+	require.Len(t, runs, 1, "the new message starts a run, and what the conversation already passed does not")
+	h.advance(t, runs[0].ID)
+	h.sendQueued(t)
+	assert.Len(t, *h.sent, 1)
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.new", "inbound", "reader", "guide", base.Add(time.Second))))
+	h.poll(t)
+	assert.Len(t, h.runs(t), 1, "the late webhook starts nothing further")
+	assert.Len(t, *h.sent, 1)
 }
 
 func TestDMActivationChecksTheAccount(t *testing.T) {
@@ -547,6 +605,46 @@ func (h *dmHarness) igConversation(t *testing.T) string {
 	var id string
 	require.NoError(t, h.db.NewSelect().Model((*models.Conversation)(nil)).Column("id").Where("social_account_id = 'ig'").Scan(t.Context(), &id))
 	return id
+}
+
+func TestDMSenderLimitStopsSequenceRunsThatFailOrSkip(t *testing.T) {
+	five := dmSequenceStep("automatic")
+	five.Inputs["messages"] = workflows.Value{Literal: `[{"text":"1","delay_minutes":0},{"text":"2","delay_minutes":0},{"text":"3","delay_minutes":0},{"text":"4","delay_minutes":0},{"text":"5","delay_minutes":0}]`}
+	h := newDMHarness(t, []workflows.Step{five})
+	base := time.Now().UTC()
+	started := map[string]bool{}
+	for i := range 8 {
+		require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent(fmt.Sprintf("mid.%d", i), "inbound", "reader", "guide", base.Add(time.Duration(i)*time.Second))))
+		h.poll(t)
+		for _, run := range h.runs(t) {
+			if started[run.ID] || run.State != workflows.StateQueued {
+				continue
+			}
+			started[run.ID] = true
+			current := run
+			for range 8 {
+				current = h.advance(t, current.ID)
+				if current.State != workflows.StateWaiting && current.State != workflows.StateQueued && current.State != workflows.StateRunning {
+					break
+				}
+				h.sendQueued(t)
+			}
+		}
+	}
+	assert.Len(t, started, 5, "later runs fail or skip, and they still count")
+	assert.Len(t, *h.sent, 5)
+	runs := h.runs(t)
+	require.Len(t, runs, 8, "every message is accounted for")
+	limited := 0
+	for _, run := range runs {
+		if !started[run.ID] {
+			limited++
+			assert.Equal(t, workflows.StateCancelled, run.State)
+			assert.Contains(t, run.Error, "daily limit")
+			assert.Empty(t, run.Steps, "no step ran")
+		}
+	}
+	assert.Equal(t, 3, limited)
 }
 
 func TestDMExpiredSequenceApprovalStopsBlockingTheNextTrigger(t *testing.T) {
