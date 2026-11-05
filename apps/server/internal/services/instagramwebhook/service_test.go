@@ -75,7 +75,14 @@ func seedAccount(t *testing.T, db *bun.DB, id, platformName, capabilityState str
 
 func readiness(t *testing.T, db *bun.DB) []models.EngagementSyncState {
 	t.Helper()
-	states, err := Readiness(t.Context(), db, "w1")
+	states, err := EngagementStates(t.Context(), db, "w1")
+	require.NoError(t, err)
+	return states
+}
+
+func messageReadiness(t *testing.T, db *bun.DB) []models.MessagingSyncState {
+	t.Helper()
+	states, err := MessagingStates(t.Context(), db, "w1")
 	require.NoError(t, err)
 	return states
 }
@@ -97,24 +104,68 @@ func TestEnableFeatureSubscribesAndFailureNeverBlocksTheToggle(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, enabled)
 	require.Equal(t, []platform.InstagramWebhookSubscription{{AccessToken: "page-token-1", AccountID: "17841400000000123", PageID: "104200000000456"}}, adapter.inputs)
-	states := readiness(t, db)
-	require.Len(t, states, 1)
-	require.Equal(t, "permission_required", states[0].Status)
-	require.Equal(t, platform.InstagramWebhookPermissionDenied, states[0].ErrorCode)
-	require.Contains(t, states[0].ErrorMessage, "Advanced Access")
-	require.NotContains(t, states[0].ErrorMessage, "page-token-1")
-	require.Equal(t, "ig1", states[0].SocialAccountID)
+	// Direct messages only: the failure is a Messages row, never Comments,
+	// and it is not a successful collection.
+	require.Empty(t, readiness(t, db))
+	messages := messageReadiness(t, db)
+	require.Len(t, messages, 1)
+	require.Equal(t, "ig1", messages[0].SocialAccountID)
+	require.Equal(t, "permission_required", messages[0].Status)
+	require.Equal(t, platform.InstagramWebhookPermissionDenied, messages[0].ErrorCode)
+	require.Contains(t, messages[0].ErrorMessage, "Advanced Access")
+	require.NotContains(t, messages[0].ErrorMessage, "page-token-1")
+	require.True(t, messages[0].LastSuccessAt.IsZero(), "a failed subscription is not a successful sync")
 
-	// Enabling the second feature repeats the subscription, and a success
-	// clears the earlier failure.
-	_, err = features.BatchSave(t.Context(), "w1", actor, []accountfeatures.ChoiceInput{{AccountID: "ig1", Feature: accountfeatures.FeatureMessaging, Enabled: false}, {AccountID: "ig1", Feature: accountfeatures.FeatureMessaging, Enabled: true}})
+	// Turning Direct messages off and on retries and succeeds, so no row is
+	// emitted at all (a success is not a sync state).
+	_, err = features.BatchSave(t.Context(), "w1", actor, []accountfeatures.ChoiceInput{{AccountID: "ig1", Feature: accountfeatures.FeatureMessaging, Enabled: false}})
+	require.NoError(t, err)
+	_, err = features.BatchSave(t.Context(), "w1", actor, []accountfeatures.ChoiceInput{{AccountID: "ig1", Feature: accountfeatures.FeatureMessaging, Enabled: true}})
 	require.NoError(t, err)
 	require.Len(t, adapter.inputs, 2)
-	states = readiness(t, db)
-	require.Len(t, states, 1)
-	require.Equal(t, "ok", states[0].Status)
-	require.Empty(t, states[0].ErrorCode)
-	require.False(t, states[0].LastSuccessAt.IsZero())
+	require.Empty(t, readiness(t, db))
+	require.Empty(t, messageReadiness(t, db))
+	var row models.InstagramWebhookSubscription
+	require.NoError(t, db.NewSelect().Model(&row).Where("social_account_id = ?", "ig1").Scan(t.Context()))
+	require.Equal(t, StatusSubscribed, row.Status)
+}
+
+func TestFailureShowsUnderEachEnabledFeatureOnly(t *testing.T) {
+	db := testDB(t)
+	seedAccount(t, db, "ig1", "instagram", `{}`)
+	adapter := &fakeInstagram{errs: []error{&platform.HTTPError{StatusCode: 503}}}
+	svc := NewService(db, &tokenSource{token: "t"}, map[string]platform.Adapter{"instagram": adapter})
+	require.Error(t, svc.Ensure(t.Context(), "ig1"))
+	now := time.Now().UTC()
+	for _, feature := range []string{accountfeatures.FeatureEngagement, accountfeatures.FeatureMessaging} {
+		_, err := db.NewInsert().Model(&models.AccountFeature{SocialAccountID: "ig1", WorkspaceID: "w1", Feature: feature, Enabled: true, Source: "test", DecidedAt: now, CreatedAt: now, UpdatedAt: now}).Exec(t.Context())
+		require.NoError(t, err)
+		if feature == accountfeatures.FeatureEngagement {
+			require.Len(t, readiness(t, db), 1)
+			require.Empty(t, messageReadiness(t, db))
+		} else {
+			require.Len(t, readiness(t, db), 1)
+			require.Len(t, messageReadiness(t, db), 1)
+		}
+	}
+	comments := readiness(t, db)[0]
+	require.Equal(t, "temporarily_unavailable", comments.Status)
+	require.True(t, comments.LastSuccessAt.IsZero())
+}
+
+func TestSuccessfulSubscriptionEmitsNoSyncState(t *testing.T) {
+	db := testDB(t)
+	seedAccount(t, db, "ig1", "instagram", `{}`)
+	adapter := &fakeInstagram{}
+	svc := NewService(db, &tokenSource{token: "t"}, map[string]platform.Adapter{"instagram": adapter})
+	now := time.Now().UTC()
+	for _, feature := range []string{accountfeatures.FeatureEngagement, accountfeatures.FeatureMessaging} {
+		_, err := db.NewInsert().Model(&models.AccountFeature{SocialAccountID: "ig1", WorkspaceID: "w1", Feature: feature, Enabled: true, Source: "test", DecidedAt: now, CreatedAt: now, UpdatedAt: now}).Exec(t.Context())
+		require.NoError(t, err)
+	}
+	require.NoError(t, svc.Ensure(t.Context(), "ig1"))
+	require.Empty(t, readiness(t, db), "mobile takes the newest last_success_at across sync states")
+	require.Empty(t, messageReadiness(t, db))
 }
 
 func TestDisablingOrOtherPlatformsDoNotSubscribe(t *testing.T) {
@@ -213,6 +264,9 @@ func TestReconnectHookSubscribesOnlyInstagramAccounts(t *testing.T) {
 	_, err := db.NewInsert().Model(&models.AccountFeature{SocialAccountID: "ig1", WorkspaceID: "w1", Feature: accountfeatures.FeatureMessaging, Enabled: true, Source: "test", DecidedAt: now, CreatedAt: now, UpdatedAt: now}).Exec(t.Context())
 	require.NoError(t, err)
 	ReconnectHook(svc)(t.Context(), []*models.SocialAccount{{ID: "x1", Platform: "x"}, {ID: "ig1", Platform: "instagram"}})
-	require.Eventually(t, func() bool { return len(readiness(t, db)) == 1 }, 3*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		n, err := db.NewSelect().Model((*models.InstagramWebhookSubscription)(nil)).Where("status = ?", StatusSubscribed).Count(t.Context())
+		return err == nil && n == 1
+	}, 3*time.Second, 10*time.Millisecond)
 	require.Len(t, adapter.inputs, 1)
 }

@@ -158,39 +158,82 @@ func (s *Service) record(ctx context.Context, account models.SocialAccount, stat
 	return err
 }
 
-// Readiness maps stored attempts to the engagement sync-state shape the inbox
-// already renders. Only accounts that still have a subscribing feature on are
-// reported, so a disabled feature does not leave a stale failure behind.
-func Readiness(ctx context.Context, db bun.IDB, workspaceID string) ([]models.EngagementSyncState, error) {
+// Failure is a failed subscription as the inbox sync-state surfaces show it.
+// Successful subscriptions are not reported: they are not a collection run
+// and must not move the inbox's last-successful-sync time.
+type Failure struct {
+	ID              string
+	WorkspaceID     string
+	SocialAccountID string
+	Status          string
+	ErrorCode       string
+	ErrorMessage    string
+	LastAttemptedAt time.Time
+}
+
+// Failures lists failed subscriptions for accounts that still have the given
+// feature on ("engagement" for Comments, "messaging" for Messages), so a
+// disabled feature leaves no stale failure behind.
+func Failures(ctx context.Context, db bun.IDB, workspaceID, feature string) ([]Failure, error) {
 	var rows []models.InstagramWebhookSubscription
 	err := db.NewSelect().Model(&rows).
-		Where("iws.workspace_id = ?", workspaceID).
-		Where("EXISTS (SELECT 1 FROM account_features AS f WHERE f.social_account_id = iws.social_account_id AND f.enabled = ? AND f.feature IN (?))", true, bun.List(subscribingFeatures)).
+		Where("iws.workspace_id = ? AND iws.status = ?", workspaceID, StatusFailed).
+		Where("EXISTS (SELECT 1 FROM account_features AS f WHERE f.social_account_id = iws.social_account_id AND f.enabled = ? AND f.feature = ?)", true, feature).
 		Order("iws.social_account_id ASC").
 		Scan(ctx)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
-	states := make([]models.EngagementSyncState, 0, len(rows))
+	failures := make([]Failure, 0, len(rows))
 	for _, row := range rows {
-		status := "ok"
-		if row.Status == StatusFailed {
-			status = "error"
-			switch row.ErrorCode {
-			case platform.InstagramWebhookRateLimited:
-				status = "rate_limited"
-			case platform.InstagramWebhookUnavailable:
-				status = "temporarily_unavailable"
-			case platform.InstagramWebhookAuthRequired, platform.InstagramWebhookPermissionDenied:
-				status = "permission_required"
-			}
-		}
-		states = append(states, models.EngagementSyncState{
-			ID: "instagram-webhook:" + row.SocialAccountID, Feed: "comments", WorkspaceID: row.WorkspaceID,
-			SocialAccountID: row.SocialAccountID, Platform: "instagram", Status: status,
+		failures = append(failures, Failure{
+			ID: "instagram-webhook:" + row.SocialAccountID, WorkspaceID: row.WorkspaceID,
+			SocialAccountID: row.SocialAccountID, Status: failureStatus(row.ErrorCode),
 			ErrorCode: row.ErrorCode, ErrorMessage: strings.TrimSpace(row.ErrorMessage),
-			LastAttemptedAt: row.LastAttemptedAt, LastSuccessAt: row.LastSuccessAt,
+			LastAttemptedAt: row.LastAttemptedAt,
 		})
+	}
+	return failures, nil
+}
+
+func failureStatus(code string) string {
+	switch code {
+	case platform.InstagramWebhookRateLimited:
+		return "rate_limited"
+	case platform.InstagramWebhookUnavailable:
+		return "temporarily_unavailable"
+	case platform.InstagramWebhookAuthRequired, platform.InstagramWebhookPermissionDenied:
+		return "permission_required"
+	}
+	return "error"
+}
+
+// EngagementStates shapes Comments failures for the engagement inbox.
+func EngagementStates(ctx context.Context, db bun.IDB, workspaceID string) ([]models.EngagementSyncState, error) {
+	failures, err := Failures(ctx, db, workspaceID, "engagement")
+	if err != nil {
+		return nil, err
+	}
+	states := make([]models.EngagementSyncState, 0, len(failures))
+	for _, f := range failures {
+		states = append(states, models.EngagementSyncState{ID: f.ID, Feed: "comments", WorkspaceID: f.WorkspaceID,
+			SocialAccountID: f.SocialAccountID, Platform: "instagram", Status: f.Status, ErrorCode: f.ErrorCode,
+			ErrorMessage: f.ErrorMessage, LastAttemptedAt: f.LastAttemptedAt})
+	}
+	return states, nil
+}
+
+// MessagingStates shapes Direct message failures for the Messages inbox.
+func MessagingStates(ctx context.Context, db bun.IDB, workspaceID string) ([]models.MessagingSyncState, error) {
+	failures, err := Failures(ctx, db, workspaceID, "messaging")
+	if err != nil {
+		return nil, err
+	}
+	states := make([]models.MessagingSyncState, 0, len(failures))
+	for _, f := range failures {
+		states = append(states, models.MessagingSyncState{ID: f.ID, WorkspaceID: f.WorkspaceID,
+			SocialAccountID: f.SocialAccountID, Platform: "instagram", Status: f.Status, ErrorCode: f.ErrorCode,
+			ErrorMessage: f.ErrorMessage, LastAttemptedAt: f.LastAttemptedAt})
 	}
 	return states, nil
 }

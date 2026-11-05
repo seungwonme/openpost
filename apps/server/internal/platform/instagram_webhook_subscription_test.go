@@ -90,25 +90,23 @@ func TestInstagramWebhookSubscriptionRequiresConfirmation(t *testing.T) {
 
 func TestClassifyInstagramWebhookError(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		err       error
-		code      string
-		retryable bool
+		name string
+		err  error
+		code string
 	}{
-		{"expired token", &HTTPError{StatusCode: 400, Code: "190"}, InstagramWebhookAuthRequired, false},
-		{"unauthorized", &HTTPError{StatusCode: 401}, InstagramWebhookAuthRequired, false},
-		{"missing permission", &HTTPError{StatusCode: 403, Code: "10"}, InstagramWebhookPermissionDenied, false},
-		{"app permission", &HTTPError{StatusCode: 400, Code: "200"}, InstagramWebhookPermissionDenied, false},
-		{"app throttled", &HTTPError{StatusCode: 400, Code: "4"}, InstagramWebhookRateLimited, true},
-		{"http throttled", &HTTPError{StatusCode: 429}, InstagramWebhookRateLimited, true},
-		{"meta outage", &HTTPError{StatusCode: 503}, InstagramWebhookUnavailable, true},
-		{"network", fmt.Errorf("dial: %w", context.DeadlineExceeded), InstagramWebhookUnavailable, true},
-		{"invalid parameter", &HTTPError{StatusCode: 400, Code: "100"}, InstagramWebhookRejected, false},
+		{"expired token", &HTTPError{StatusCode: 400, Code: "190"}, InstagramWebhookAuthRequired},
+		{"unauthorized", &HTTPError{StatusCode: 401}, InstagramWebhookAuthRequired},
+		{"missing permission", &HTTPError{StatusCode: 403, Code: "10"}, InstagramWebhookPermissionDenied},
+		{"app permission", &HTTPError{StatusCode: 400, Code: "200"}, InstagramWebhookPermissionDenied},
+		{"app throttled", &HTTPError{StatusCode: 400, Code: "4"}, InstagramWebhookRateLimited},
+		{"http throttled", &HTTPError{StatusCode: 429}, InstagramWebhookRateLimited},
+		{"meta outage", &HTTPError{StatusCode: 503}, InstagramWebhookUnavailable},
+		{"network", fmt.Errorf("dial: %w", context.DeadlineExceeded), InstagramWebhookUnavailable},
+		{"invalid parameter", &HTTPError{StatusCode: 400, Code: "100"}, InstagramWebhookRejected},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			failure := ClassifyInstagramWebhookError(tc.err)
 			require.Equal(t, tc.code, failure.Code)
-			require.Equal(t, tc.retryable, failure.Retryable)
 			require.NotEmpty(t, failure.Message)
 		})
 	}

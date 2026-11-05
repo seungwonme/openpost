@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 )
 
 // InstagramWebhookFields are the app webhook fields OpenPost consumes. Meta
@@ -75,10 +76,11 @@ func (i *InstagramAdapter) SubscribeInstagramWebhooks(ctx context.Context, in In
 
 // InstagramWebhookFailure is a token-free, user-actionable classification.
 type InstagramWebhookFailure struct {
-	Code      string
-	Message   string
-	Retryable bool
+	Code    string
+	Message string
 }
+
+const instagramWebhookRetryHint = "Retry by toggling the feature off and on, or by reconnecting the account."
 
 // ClassifyInstagramWebhookError never includes provider response text.
 func ClassifyInstagramWebhookError(err error) InstagramWebhookFailure {
@@ -88,24 +90,39 @@ func ClassifyInstagramWebhookError(err error) InstagramWebhookFailure {
 	}
 	var providerErr *HTTPError
 	if !errors.As(err, &providerErr) {
-		return InstagramWebhookFailure{Code: InstagramWebhookUnavailable, Retryable: true,
-			Message: "Instagram could not be reached to subscribe this account to webhooks. Toggle the feature off and on, or reconnect the account, to retry."}
+		return InstagramWebhookFailure{Code: InstagramWebhookUnavailable,
+			Message: "Instagram could not be reached to subscribe this account to webhooks. " + instagramWebhookRetryHint}
 	}
-	switch {
-	case providerErr.StatusCode == http.StatusUnauthorized || providerErr.Code == "190" || providerErr.Code == "102":
-		return InstagramWebhookFailure{Code: InstagramWebhookAuthRequired,
-			Message: "Instagram rejected the account token. Reconnect the account to receive comment and message webhooks."}
-	case providerErr.StatusCode == http.StatusTooManyRequests || providerErr.Code == "4" || providerErr.Code == "17" || providerErr.Code == "32" || providerErr.Code == "613":
-		return InstagramWebhookFailure{Code: InstagramWebhookRateLimited, Retryable: true,
-			Message: "Instagram is rate limiting this app. Retry later by toggling the feature off and on, or reconnecting."}
-	case providerErr.StatusCode >= http.StatusInternalServerError:
-		return InstagramWebhookFailure{Code: InstagramWebhookUnavailable, Retryable: true,
-			Message: "Instagram is temporarily unavailable. Retry later by toggling the feature off and on, or reconnecting."}
-	case providerErr.StatusCode == http.StatusForbidden || providerErr.Code == "10" || providerErr.Code == "3" || providerErr.Code == "200":
-		return InstagramWebhookFailure{Code: InstagramWebhookPermissionDenied,
-			Message: "Meta denied the webhook subscription. Check that the Meta app is Live with Advanced Access for comments, then reconnect the account."}
-	default:
-		return InstagramWebhookFailure{Code: InstagramWebhookRejected,
-			Message: "Meta rejected the webhook subscription. Check the app webhook settings and that the account is a public professional account, then reconnect."}
+	for _, rule := range instagramWebhookRules {
+		if rule.matches(providerErr) {
+			return InstagramWebhookFailure{Code: rule.code, Message: rule.message}
+		}
 	}
+	return InstagramWebhookFailure{Code: InstagramWebhookRejected,
+		Message: "Meta rejected the webhook subscription. Check the app webhook settings and that the account is a public professional account, then reconnect."}
+}
+
+type instagramWebhookRule struct {
+	statuses []int
+	minState int
+	codes    []string
+	code     string
+	message  string
+}
+
+func (r instagramWebhookRule) matches(err *HTTPError) bool {
+	return slices.Contains(r.statuses, err.StatusCode) || slices.Contains(r.codes, err.Code) ||
+		(r.minState > 0 && err.StatusCode >= r.minState)
+}
+
+// Order matters: the first matching rule wins.
+var instagramWebhookRules = []instagramWebhookRule{
+	{statuses: []int{http.StatusUnauthorized}, codes: []string{"190", "102"}, code: InstagramWebhookAuthRequired,
+		message: "Instagram rejected the account token. Reconnect the account to receive comment and message webhooks."},
+	{statuses: []int{http.StatusTooManyRequests}, codes: []string{"4", "17", "32", "613"}, code: InstagramWebhookRateLimited,
+		message: "Instagram is rate limiting this app. " + instagramWebhookRetryHint},
+	{minState: http.StatusInternalServerError, code: InstagramWebhookUnavailable,
+		message: "Instagram is temporarily unavailable. " + instagramWebhookRetryHint},
+	{statuses: []int{http.StatusForbidden}, codes: []string{"10", "3", "200"}, code: InstagramWebhookPermissionDenied,
+		message: "Meta denied the webhook subscription. Check that the Meta app is Live with Advanced Access for comments, then reconnect the account."},
 }

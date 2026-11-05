@@ -1522,7 +1522,7 @@ func (s *Service) ListEngagementSyncStates(ctx context.Context, actor Actor, wor
 	for _, feed := range feeds {
 		states = append(states, models.EngagementSyncState{ID: "engagement:account:" + feed.SocialAccountID + ":" + feed.Feed, Feed: feed.Feed, WorkspaceID: feed.WorkspaceID, SocialAccountID: feed.SocialAccountID, Platform: feed.Platform, Status: feed.Status, ErrorCode: feed.ErrorCode, ErrorMessage: feed.ErrorMessage, LastAttemptedAt: feed.LastAttemptedAt, LastSuccessAt: feed.LastSuccessAt, NextSyncAt: feed.NextSyncAt})
 	}
-	webhooks, err := instagramwebhook.Readiness(ctx, s.db, workspaceID)
+	webhooks, err := instagramwebhook.EngagementStates(ctx, s.db, workspaceID)
 	if err != nil {
 		return nil, err
 	}
