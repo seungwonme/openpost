@@ -112,6 +112,25 @@ describe('account management route URL interpretation', () => {
 		});
 	});
 
+	it('names both causes when a configuration found no Instagram account', () => {
+		const state = interpretAccountManagementURL(
+			new URL(
+				'https://openpost.test/settings?tab=accounts&oauth_status=failed&oauth_reason=instagram_configuration_no_account&workspace_id=workspace-62'
+			)
+		);
+
+		expect(state).toEqual({
+			feedback: { kind: 'instagram_configuration_no_account' },
+			workspaceID: 'workspace-62',
+			cleanHref: '/settings?tab=accounts'
+		});
+		expect(presentAccountManagementFeedback(state.feedback)).toEqual({
+			tone: 'error',
+			message:
+				"Instagram found no account for this connection. Either the account is not linked to a Facebook Page you can manage, or your Meta configuration issues a user token instead of a system-user token. Check the configuration's token type in the Meta dashboard, then reconnect."
+		});
+	});
+
 	it('explains when Unified Login shared no Instagram account', () => {
 		const state = interpretAccountManagementURL(
 			new URL(

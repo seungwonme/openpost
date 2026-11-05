@@ -64,6 +64,9 @@ func (g *fakeGraph) all() []graphRequest {
 func startFakeGraph(t *testing.T, responses map[string]string) *fakeGraph {
 	t.Helper()
 	t.Setenv("META_GRAPH_API_VERSION", "v25.0")
+	previousDelay := metaInspectionRetryDelay
+	metaInspectionRetryDelay = 0
+	t.Cleanup(func() { metaInspectionRetryDelay = previousDelay })
 	graph := &fakeGraph{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)

@@ -2064,6 +2064,7 @@
 	"accounts_oauth_account_selection_failed": "OpenPost 无法列出可用账号。请检查服务商权限和账号访问权限，然后重新连接。",
 	"accounts_oauth_account_save_failed": "OpenPost 无法保存连接。请检查工作区访问权限和套餐限额，然后重新连接。",
 	"accounts_oauth_facebook_no_pages": "Facebook 未共享任何可管理的主页，请创建主页、申请主页权限或检查 Facebook 应用权限后重试。",
+	"accounts_oauth_instagram_configuration_no_account": "Instagram 未找到此连接对应的账号。可能是账号未关联到你可管理的 Facebook 主页，或者你的 Meta 配置签发的是用户令牌而不是系统用户令牌。请在 Meta 控制面板中检查配置的令牌类型，然后重新连接。",
 	"accounts_oauth_instagram_no_assigned_account": "Instagram 未找到与此应用共享的专业账号。请重新登录，选择拥有该账号的商业资产组合，并共享 Instagram 账号。",
 	"accounts_oauth_instagram_no_page_linked_account": "Instagram 需要绑定到你可管理的 Facebook 主页的商业或创作者账号，请先绑定主页、确认主页权限后重新连接。",
 	"accounts_oauth_confirm_title": "连接 {platform}",

@@ -159,6 +159,9 @@ func (i *InstagramAdapter) GenerateAuthURL(state string) (string, map[string]str
 		// scope list in the dialog, and auth_type has no meaning there.
 		// The code exchange stays the shared oauth/access_token endpoint.
 		params.Set("config_id", i.configID)
+		// Without this, a person already logged in to Facebook continues as that
+		// account and never sees the Instagram login option.
+		params.Set("prompt", "login")
 		return facebookOAuthBaseURL + "/" + i.graphVersion + "/dialog/oauth?" + params.Encode(), nil
 	}
 	params.Set("scope", strings.Join(instagramScopes(), ","))
@@ -338,6 +341,9 @@ func (i *InstagramAdapter) listInstagramPages(ctx context.Context, token *TokenR
 		}
 	}
 	if len(pages) == 0 {
+		if i.configID != "" {
+			return nil, ErrNoInstagramAccountForConfiguration
+		}
 		return nil, ErrNoInstagramProfessionalAccount
 	}
 	return pages, nil

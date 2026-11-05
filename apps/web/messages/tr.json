@@ -2064,6 +2064,7 @@
 	"accounts_oauth_account_selection_failed": "OpenPost kullanılabilir hesapları listeleyemedi. Sağlayıcı izinlerini ve hesap erişiminizi kontrol edip yeniden bağlanın.",
 	"accounts_oauth_account_save_failed": "OpenPost bağlantıyı kaydedemedi. Çalışma alanı erişimini ve plan sınırlarını kontrol edip yeniden bağlanın.",
 	"accounts_oauth_facebook_no_pages": "Facebook yönetebileceğin Sayfa paylaşmadı. Bir Sayfa oluştur, Sayfa erişimi iste ya da Facebook uygulama izinlerini kontrol et, sonra tekrar dene.",
+	"accounts_oauth_instagram_configuration_no_account": "Instagram bu bağlantı için hesap bulamadı. Hesap yönetebildiğin bir Facebook Sayfasına bağlı değil ya da Meta yapılandırman sistem kullanıcısı belirteci yerine kullanıcı belirteci veriyor. Meta panosunda yapılandırmanın belirteç türünü kontrol et, ardından yeniden bağlan.",
 	"accounts_oauth_instagram_no_assigned_account": "Instagram bu uygulamayla paylaşılan bir profesyonel hesap bulamadı. Yeniden giriş yapın, hesabın sahibi olan işletme portföyünü seçin ve Instagram hesabını paylaşın.",
 	"accounts_oauth_instagram_no_page_linked_account": "Instagram, yönetebildiğin bir Facebook Sayfasına bağlı bir İşletme ya da İçerik Üretici hesabı ister. Hesabı bir Sayfaya bağla, Sayfa erişimini kontrol et, sonra yeniden bağla.",
 	"accounts_oauth_confirm_title": "{platform} bağla",

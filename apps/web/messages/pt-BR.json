@@ -2100,6 +2100,7 @@
 	"accounts_oauth_account_selection_failed": "O OpenPost não conseguiu listar as contas disponíveis. Confira as permissões do provedor e o acesso às contas e conecte novamente.",
 	"accounts_oauth_account_save_failed": "O OpenPost não conseguiu salvar a conexão. Confira o acesso ao espaço de trabalho e os limites do plano e conecte novamente.",
 	"accounts_oauth_facebook_no_pages": "O Facebook não compartilhou páginas gerenciáveis. Crie uma página, peça acesso à página ou verifique as permissões do app do Facebook e tente de novo.",
+	"accounts_oauth_instagram_configuration_no_account": "O Instagram não encontrou nenhuma conta para esta conexão. A conta não está vinculada a uma Página do Facebook que você possa gerenciar, ou sua configuração da Meta emite um token de usuário em vez de um token de usuário do sistema. Verifique o tipo de token da configuração no painel da Meta e reconecte.",
 	"accounts_oauth_instagram_no_assigned_account": "O Instagram não encontrou nenhuma conta profissional compartilhada com este app. Entre novamente, escolha o portfólio empresarial dono da conta e compartilhe a conta do Instagram.",
 	"accounts_oauth_instagram_no_page_linked_account": "O Instagram precisa de uma conta Business ou de Criador vinculada a uma página do Facebook que você gerencia. Vincule a conta a uma página, verifique seu acesso à página e reconecte.",
 	"accounts_oauth_confirm_title": "Conectar {platform}",

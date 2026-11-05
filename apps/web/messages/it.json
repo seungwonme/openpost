@@ -2100,6 +2100,7 @@
 	"accounts_oauth_account_selection_failed": "OpenPost non ha potuto elencare gli account disponibili. Controlla le autorizzazioni del provider e l’accesso agli account, poi ricollegali.",
 	"accounts_oauth_account_save_failed": "OpenPost non ha potuto salvare la connessione. Controlla l’accesso allo spazio di lavoro e i limiti del piano, poi ricollega l’account.",
 	"accounts_oauth_facebook_no_pages": "Facebook non ha condiviso alcuna pagina gestibile. Crea una Pagina, richiedi l'accesso alla Pagina o controlla le autorizzazioni dell'app Facebook, quindi riprova.",
+	"accounts_oauth_instagram_configuration_no_account": "Instagram non ha trovato alcun account per questa connessione. L’account non è collegato a una Pagina Facebook che puoi gestire, oppure la tua configurazione Meta emette un token utente invece di un token utente di sistema. Controlla il tipo di token della configurazione nella dashboard Meta, poi riconnetti.",
 	"accounts_oauth_instagram_no_assigned_account": "Instagram non ha trovato alcun account professionale condiviso con questa app. Accedi di nuovo, scegli il portfolio business proprietario dell’account e condividi l’account Instagram.",
 	"accounts_oauth_instagram_no_page_linked_account": "Instagram necessita di un account Business o Creator collegato a una Pagina Facebook che puoi gestire. Collega l'account a una Pagina, controlla l'accesso alla Pagina, quindi riconnettiti.",
 	"accounts_oauth_confirm_title": "Collegare {platform}",

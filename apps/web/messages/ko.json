@@ -2064,6 +2064,7 @@
 	"accounts_oauth_account_selection_failed": "OpenPost가 사용 가능한 계정을 불러오지 못했습니다. 제공업체 권한과 계정 접근 권한을 확인한 후 다시 연결하세요.",
 	"accounts_oauth_account_save_failed": "OpenPost가 연결을 저장하지 못했습니다. 워크스페이스 접근 권한과 요금제 한도를 확인한 후 다시 연결하세요.",
 	"accounts_oauth_facebook_no_pages": "Facebook에서 관리 가능한 페이지를 공유하지 않았습니다. 페이지를 만들거나 페이지 접근을 요청하거나 Facebook 앱 권한을 확인한 뒤 다시 시도하세요.",
+	"accounts_oauth_instagram_configuration_no_account": "이 연결에 해당하는 계정을 Instagram에서 찾지 못했습니다. 계정이 관리 가능한 Facebook 페이지에 연결되어 있지 않거나, Meta 구성이 시스템 사용자 토큰 대신 사용자 토큰을 발급합니다. Meta 대시보드에서 구성의 토큰 유형을 확인한 뒤 다시 연결하세요.",
 	"accounts_oauth_instagram_no_assigned_account": "이 앱에 공유된 프로페셔널 계정을 Instagram에서 찾지 못했습니다. 다시 로그인해 계정을 소유한 비즈니스 포트폴리오를 선택하고 Instagram 계정을 공유하세요.",
 	"accounts_oauth_instagram_no_page_linked_account": "Instagram에는 관리 가능한 Facebook 페이지에 연결된 비즈니스 또는 크리에이터 계정이 필요합니다. 계정을 페이지에 연결하고 페이지 권한을 확인한 뒤 다시 시도하세요.",
 	"accounts_oauth_confirm_title": "{platform} 연결",

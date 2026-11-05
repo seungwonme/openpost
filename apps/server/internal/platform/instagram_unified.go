@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -25,9 +26,26 @@ const (
 	metaNonexistentFieldCode = "100"
 )
 
+// Evidence recorded for the first live connection. Fixed strings only.
+const (
+	metaTokenEvidenceDebugType            = "debug_token_type"
+	metaTokenEvidenceClientBusiness       = "client_business_id"
+	metaTokenEvidenceNoClientBusiness     = "no_client_business_id"
+	metaTokenEvidenceClientBusinessAbsent = "client_business_id_unavailable"
+)
+
 // ErrNoInstagramAssignedAccount means the client business shared no Instagram
 // professional account with this app during Unified Login.
 var ErrNoInstagramAssignedAccount = errors.New("instagram unified login shared no professional account")
+
+// ErrNoInstagramAccountForConfiguration replaces the plain Page error when a
+// config_id connection took the Page path and found no account. Either cause
+// fits: the account has no manageable Page, or the configuration issues a user
+// token and needed a system user token.
+var ErrNoInstagramAccountForConfiguration = errors.New("instagram found no account for this configuration: link the account to a Facebook Page you can manage, or check the configuration's token type")
+
+// metaInspectionRetryDelay spaces the single retry of a token inspection.
+var metaInspectionRetryDelay = 500 * time.Millisecond
 
 // NewInstagramUnifiedLoginAdapter serves accounts whose token belongs to the
 // client's business portfolio. Every call uses the Instagram account ID on
@@ -64,10 +82,11 @@ func InstagramUnifiedMessagingScopes() []string {
 // metaTokenInspection is the debug_token result. Type is absent from Meta's
 // reference table, so an empty or unknown value falls back to client_business_id.
 type metaTokenInspection struct {
-	Type      string   `json:"type"`
-	IsValid   bool     `json:"is_valid"`
-	Scopes    []string `json:"scopes"`
-	ExpiresAt int64    `json:"expires_at"`
+	Type    string   `json:"type"`
+	IsValid bool     `json:"is_valid"`
+	Scopes  []string `json:"scopes"`
+	// ExpiresAt is nil when Meta omits it. Zero states the token never expires.
+	ExpiresAt *int64 `json:"expires_at"`
 	// UserID is only the grant subject fallback, so its JSON type must not be
 	// able to fail a connection.
 	UserID json.RawMessage `json:"user_id"`
@@ -87,10 +106,11 @@ func (i *InstagramAdapter) exchangeConfigurationCode(ctx context.Context, code s
 	if err != nil {
 		return nil, fmt.Errorf("instagram token inspection: %w", err)
 	}
-	systemUser, err := i.isSystemUserToken(ctx, token.AccessToken, inspection)
+	systemUser, evidence, err := i.isSystemUserToken(ctx, token.AccessToken, inspection)
 	if err != nil {
 		return nil, fmt.Errorf("instagram token type: %w", err)
 	}
+	logInstagramTokenClassification(systemUser, evidence, inspection.Type)
 	if systemUser {
 		return unifiedLoginToken(token, inspection)
 	}
@@ -104,12 +124,51 @@ func (i *InstagramAdapter) exchangeConfigurationCode(ctx context.Context, code s
 	return tokenWithGrantedScopes(token, scopes), nil
 }
 
+// logInstagramTokenClassification never receives a token. The Meta type is
+// reduced to known values so provider text cannot reach the log.
+func logInstagramTokenClassification(systemUser bool, evidence, debugType string) {
+	connection := "page_flow"
+	if systemUser {
+		connection = ConnectionModeUnifiedLogin
+	}
+	reported := "other"
+	switch normalized := strings.ToUpper(strings.TrimSpace(debugType)); normalized {
+	case "":
+		reported = "absent"
+	case metaDebugTokenSystemUser, metaDebugTokenUser, metaDebugTokenPage:
+		reported = normalized
+	}
+	log.Printf("[Instagram Token] connection=%q evidence=%q debug_token_type=%q", connection, evidence, reported)
+}
+
+// isTransientMetaFailure is limited to 5xx responses and network failures. A
+// cancelled request and every other answer from Meta are final.
+func isTransientMetaFailure(err error) bool {
+	var providerErr *HTTPError
+	if errors.As(err, &providerErr) {
+		return providerErr.StatusCode >= http.StatusInternalServerError
+	}
+	var transportErr *TransportError
+	return errors.As(err, &transportErr) && transportErr.Kind != TransportFailureCanceled
+}
+
 func (i *InstagramAdapter) inspectMetaToken(ctx context.Context, accessToken string) (metaTokenInspection, error) {
 	query := url.Values{
 		"input_token":         {accessToken},
 		oauthParamAccessToken: {i.clientID + "|" + i.clientSecret},
 	}
-	body, err := doMetaRequest(ctx, http.MethodGet, i.graphURL("debug_token")+"?"+query.Encode(), nil, nil)
+	endpoint := i.graphURL("debug_token") + "?" + query.Encode()
+	body, err := doMetaRequest(ctx, http.MethodGet, endpoint, nil, nil)
+	if isTransientMetaFailure(err) && ctx.Err() == nil {
+		// The authorization code is already spent, so a failure here costs the
+		// person the whole login. The inspection is a safe read to repeat once.
+		select {
+		case <-ctx.Done():
+			return metaTokenInspection{}, ctx.Err()
+		case <-time.After(metaInspectionRetryDelay):
+		}
+		body, err = doMetaRequest(ctx, http.MethodGet, endpoint, nil, nil)
+	}
 	if err != nil {
 		return metaTokenInspection{}, err
 	}
@@ -136,51 +195,59 @@ func (i *InstagramAdapter) inspectMetaToken(ctx context.Context, accessToken str
 
 // isSystemUserToken prefers an explicit debug_token type. Otherwise it uses the
 // documented property of these tokens: /me carries a client_business_id.
-func (i *InstagramAdapter) isSystemUserToken(ctx context.Context, accessToken string, inspection metaTokenInspection) (bool, error) {
+func (i *InstagramAdapter) isSystemUserToken(ctx context.Context, accessToken string, inspection metaTokenInspection) (systemUser bool, evidence string, err error) {
 	switch strings.ToUpper(strings.TrimSpace(inspection.Type)) {
 	case metaDebugTokenSystemUser:
-		return true, nil
+		return true, metaTokenEvidenceDebugType, nil
 	case metaDebugTokenUser, metaDebugTokenPage:
-		return false, nil
+		return false, metaTokenEvidenceDebugType, nil
 	}
 	query := url.Values{"fields": {"id,client_business_id"}, oauthParamAccessToken: {accessToken}}
 	body, err := doMetaRequest(ctx, http.MethodGet, i.graphURL("me")+"?"+query.Encode(), nil, nil)
 	if err != nil {
 		var providerErr *HTTPError
 		if errors.As(err, &providerErr) && providerErr.Code == metaNonexistentFieldCode {
-			return false, nil
+			return false, metaTokenEvidenceClientBusinessAbsent, nil
 		}
-		return false, err
+		return false, "", err
 	}
 	var response struct {
 		ClientBusinessID string          `json:"client_business_id"`
 		Error            json.RawMessage `json:"error"`
 	}
 	if err := json.Unmarshal(body, &response); err != nil {
-		return false, errors.New("meta returned an unreadable profile")
+		return false, "", errors.New("meta returned an unreadable profile")
 	}
 	if err := metaGraphEmbeddedError(response.Error); err != nil {
 		var providerErr *HTTPError
 		if errors.As(err, &providerErr) && providerErr.Code == metaNonexistentFieldCode {
-			return false, nil
+			return false, metaTokenEvidenceClientBusinessAbsent, nil
 		}
-		return false, err
+		return false, "", err
 	}
-	return strings.TrimSpace(response.ClientBusinessID) != "", nil
+	if strings.TrimSpace(response.ClientBusinessID) == "" {
+		return false, metaTokenEvidenceNoClientBusiness, nil
+	}
+	return true, metaTokenEvidenceClientBusiness, nil
 }
 
-// unifiedLoginToken keeps the configuration's real expiry and records the grant
+// unifiedLoginToken stores the expiry the inspection states and records the grant
 // Meta reports. An empty scope list is a failure, never an implied grant.
 func unifiedLoginToken(token *TokenResult, inspection metaTokenInspection) (*TokenResult, error) {
 	if len(inspection.Scopes) == 0 {
 		return nil, errors.New("instagram token inspection reported no granted permissions")
 	}
-	if inspection.ExpiresAt > 0 {
-		remaining := time.Until(time.Unix(inspection.ExpiresAt, 0))
-		if remaining <= 0 {
-			return nil, errors.New("meta reports the access token has already expired")
+	if inspection.ExpiresAt != nil {
+		// The inspection outranks the exchange's expires_in. Nothing can refresh
+		// this token, so a stale expiry would end a working connection.
+		token.ExpiresIn = 0
+		if *inspection.ExpiresAt != 0 {
+			remaining := time.Until(time.Unix(*inspection.ExpiresAt, 0))
+			if remaining <= 0 {
+				return nil, errors.New("meta reports the access token has already expired")
+			}
+			token.ExpiresIn = int(remaining.Seconds())
 		}
-		token.ExpiresIn = int(remaining.Seconds())
 	}
 	token.RefreshToken = ""
 	token = tokenWithGrantedScopes(token, inspection.Scopes)

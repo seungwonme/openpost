@@ -43,6 +43,7 @@ const mastodonProvider = "mastodon"
 const pixelfedProvider = "pixelfed"
 const oauthFailureReasonFacebookNoPages = "facebook_no_pages"
 const oauthFailureReasonInstagramNoAssignedAccount = "instagram_no_assigned_account"
+const oauthFailureReasonInstagramConfigurationNoAccount = "instagram_configuration_no_account"
 const oauthFailureReasonInstagramNoPageLinkedAccount = "instagram_no_page_linked_account"
 
 // isCompatOAuthProvider reports providers that connect through the dynamic
@@ -1469,6 +1470,9 @@ func (h *OAuthHandler) saveAccountSelectionAndRedirect(
 		}
 		if errors.Is(err, platform.ErrNoInstagramProfessionalAccount) {
 			return h.redirectWithOAuthFailure(platformName, oauthFailureReasonInstagramNoPageLinkedAccount, err, workspaceID)
+		}
+		if errors.Is(err, platform.ErrNoInstagramAccountForConfiguration) {
+			return h.redirectWithOAuthFailure(platformName, oauthFailureReasonInstagramConfigurationNoAccount, err, workspaceID)
 		}
 		if errors.Is(err, platform.ErrNoInstagramAssignedAccount) {
 			return h.redirectWithOAuthFailure(platformName, oauthFailureReasonInstagramNoAssignedAccount, err, workspaceID)
