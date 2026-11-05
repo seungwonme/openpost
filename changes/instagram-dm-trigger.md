@@ -4,3 +4,5 @@
 - Separate definite opt-outs, which are permanent until removed, from messages that may be opt-out requests, which go to a person. Remove an opt-out from Inbox for comments and direct messages.
 - End a takeover inferred from a person's message seven days after their last message, shown in Inbox.
 - Show messages held back by the per-person and daily limits.
+- Keep order questions and phone notification reports out of opt-out handling, and ignore refusals older than 30 days found in history.
+- Answer a new message first read from history while its delivery is late.

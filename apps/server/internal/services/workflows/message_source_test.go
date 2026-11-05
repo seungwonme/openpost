@@ -435,20 +435,31 @@ func TestSenderOverTheLimitIsVisibleAndStartsNoStep(t *testing.T) {
 	}
 }
 
-func TestSenderLimitCountsRunsThatSpentAndThenSkipped(t *testing.T) {
-	f := newMessageSourceFixture(t, "sqlite")
-	source := messageSource("GUIDE")
-	source.DailyLimit = 100
-	workflow := f.publish(t, source, nil)
-	for i := range maxMessageRunsPerSender + 1 {
-		f.message(t, models.DirectMessage{ID: fmt.Sprintf("m%d", i), AuthorRemoteID: "reader", Body: "guide"})
-		require.NoError(t, f.s.poll(t.Context(), workflow.ID))
-		_, err := f.s.db.NewRaw(`UPDATE workflow_runs SET state = 'succeeded', results_json = '[{"status":"skipped"}]' WHERE state = 'queued'`).Exec(t.Context())
-		require.NoError(t, err)
+func TestSenderLimitCountsRunsWhateverTheyWentOnToDo(t *testing.T) {
+	endings := map[string]string{
+		"skipped": `UPDATE workflow_runs SET state = 'succeeded', results_json = '[{"status":"skipped"}]' WHERE state = 'queued'`,
+		"failed":  `UPDATE workflow_runs SET state = 'failed', error = 'The AI step failed.' WHERE state = 'queued'`,
 	}
-	reached, err := messageSenderLimitReached(t.Context(), f.s.db, workflowRecord{ID: workflow.ID}, "c-reader", time.Now().UTC())
-	require.NoError(t, err)
-	assert.True(t, reached)
+	for name, ending := range endings {
+		t.Run(name, func(t *testing.T) {
+			f := newMessageSourceFixture(t, "sqlite")
+			source := messageSource("GUIDE")
+			source.DailyLimit = 100
+			workflow := f.publish(t, source, nil)
+			for i := range maxMessageRunsPerSender + 2 {
+				f.message(t, models.DirectMessage{ID: fmt.Sprintf("m%d", i), AuthorRemoteID: "reader", Body: "guide"})
+				require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+				_, err := f.s.db.NewRaw(ending).Exec(t.Context())
+				require.NoError(t, err)
+			}
+			queued, err := f.s.db.NewSelect().Model((*runRecord)(nil)).Where("state = ?", StateQueued).Count(t.Context())
+			require.NoError(t, err)
+			assert.Zero(t, queued, "no step of a message over the limit can run")
+			limited, err := f.s.db.NewSelect().Model((*runRecord)(nil)).Where("state = ? AND error = ?", StateCancelled, stopReasonSenderLimit).Count(t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, 2, limited)
+		})
+	}
 }
 
 func TestDailyLimitCountsSkippedRunsWhenAStepCosts(t *testing.T) {

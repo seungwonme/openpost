@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"testing"
@@ -235,12 +236,16 @@ func TestOptOutTiers(t *testing.T) {
 			"수신거부 어떻게 하나요", "수신 거부 해제해주세요", "구독취소 환불 되나요", "이제 그만 고민할게요", "그만 웃겨요 ㅋㅋㅋ", "how do i unsubscribe", "알림 끄는 법 알려주세요",
 			"이런 메시지는 이제 그만 보내주세요", "can you stop",
 			"stop?", "그만?", "수신거부요?", "unsubscribe?", "could you please stop messaging me", "stop the music", "when do you stop serving lunch", "unsubscribe me from the other list",
-			"cancel", "cancel my order", "거부", "차단", "차단합니다", "알림 꺼주세요",
+			"cancel", "Cancel it", "please cancel it", "cancel it please", "cancel this", "cancel all", "cancel please", "cancel?", "거부", "차단", "차단합니다", "제발 차단", "알림 꺼주세요", "알림 끄는 법", "알림 끄면 못 받나요",
+			"stop this", "stop all", "stop me", "stop to", "stop text",
 			"제 친구가 수신거부를 어떻게 하는지 물어봐서요 혹시 아시나요", "어제 받은 메시지가 너무 좋아서 이제 그만 고민하고 바로 결제하려고 합니다",
 		},
 		optOutNone: {
 			"", "   ", "❤️", "stop by the shop", "don't stop", "can't stop", "non stop", "stop sign", "bus stop", "guide please", "hello",
 			"그만큼 좋아요", "그만두셨나요", "그만한 가격이면 살게요", "가이드 보내주세요", "구독 어떻게 하나요", "안녕하세요", "버스탑승 안내", "거부권이 뭔가요", "차단기 가격",
+			"주문 취소 cancel 가능한가요", "차단 해제 어떻게 해요", "차단 어떻게 풀어요", "cancel my order", "cancel my order please", "can i cancel", "cancel to", "cancel send", "취소", "취소해주세요",
+			"차단됐어요", "차단 당했어요", "거부 당했어요", "카드 거부", "결제 거부",
+			"알림 꺼졌어요", "알림 꺼져서 못봤어요", "알림 꺼놨어요", "카톡 알림 꺼놨어요", "알림꺼짐", "알림 꺼둘게요", "알림 꺼뒀어요", "알림이 꺼져있어요",
 		},
 	}
 	for tier, bodies := range tests {
@@ -248,6 +253,50 @@ func TestOptOutTiers(t *testing.T) {
 			assert.Equal(t, tier, classifyOptOut(body), "%q", body)
 		}
 	}
+}
+
+func TestOrdinaryOrderMessagesLeaveAutomationRunning(t *testing.T) {
+	for i, body := range []string{"주문 취소 cancel 가능한가요", "차단 해제 어떻게 해요", "cancel my order", "can i cancel", "알림 꺼져서 못봤어요"} {
+		f := newAutomationFixture(t)
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", inboundEvent(fmt.Sprintf("mid.%d", i), body, *f.now)))
+		assert.False(t, f.optedOut(t), "%q", body)
+		assert.False(t, f.takenOver(t), "%q", body)
+	}
+}
+
+func TestOldRefusalDoesNotCreateAPermanentOptOut(t *testing.T) {
+	page := func(f automationFixture, age time.Duration) platform.FetchMessageHistoryResult {
+		return platform.FetchMessageHistoryResult{Messages: []platform.ProviderMessage{{ID: "mid.old", Direction: "inbound", AuthorRemoteID: "reader", Body: "그만", RemoteCreatedAt: f.now.Add(-age)}}}
+	}
+	conversation := func(f automationFixture) models.Conversation {
+		var c models.Conversation
+		require.NoError(t, f.db.NewSelect().Model(&c).Where("id = 'conversation'").Scan(t.Context()))
+		return c
+	}
+	t.Run("on a history page", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		require.NoError(t, f.s.persistHistoryPage(t.Context(), f.account, conversation(f), page(f, 300*24*time.Hour)))
+		assert.False(t, f.optedOut(t))
+	})
+	t.Run("in the read before a send", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		reply, err := f.s.AdvanceAutomationReply(t.Context(), f.request)
+		require.NoError(t, err)
+		*f.history = page(f, 300*24*time.Hour).Messages
+		require.NoError(t, f.runSendJob(t, reply.MessageID))
+		assert.False(t, f.optedOut(t))
+		assert.Equal(t, 1, *f.sends)
+	})
+	t.Run("inside the documented bound", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		require.NoError(t, f.s.persistHistoryPage(t.Context(), f.account, conversation(f), page(f, 29*24*time.Hour)))
+		assert.True(t, f.optedOut(t))
+	})
+	t.Run("past the bound", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		require.NoError(t, f.s.persistHistoryPage(t.Context(), f.account, conversation(f), page(f, 31*24*time.Hour)))
+		assert.False(t, f.optedOut(t))
+	})
 }
 
 func TestPossibleOptOutHandsTheConversationToAPerson(t *testing.T) {
@@ -699,6 +748,55 @@ func TestTakeoverAsksWorkflowsToStopARunWithNoReceipt(t *testing.T) {
 	require.Equal(t, []string{"conversation"}, stopped)
 }
 
+// windowedProvider reports the provider window the live path derives from a message.
+type windowedProvider struct{ testProvider }
+
+func (windowedProvider) MessagingSupport() platform.MessagingSupport {
+	return platform.MessagingSupport{Enabled: true, CanSend: true, ReplyWindow: 24 * time.Hour}
+}
+
+func TestLateWebhookMessageOnAHistoryPageStaysNew(t *testing.T) {
+	f := newAutomationFixture(t)
+	f.s.SetProvider("instagram", windowedProvider{})
+	known := f.now.Add(-48 * time.Hour)
+	_, err := f.db.NewUpdate().Model((*models.Conversation)(nil)).Set("last_message_at = ?", known).Set("messaging_window_expires_at = ?", known.Add(24*time.Hour)).Where("id = 'conversation'").Exec(t.Context())
+	require.NoError(t, err)
+	var before models.Conversation
+	require.NoError(t, f.db.NewSelect().Model(&before).Where("id = 'conversation'").Scan(t.Context()))
+	at := f.now.Add(-time.Minute)
+	arrived := platform.ProviderMessage{ID: "mid.arrived", Direction: "inbound", AuthorRemoteID: "reader", Body: "guide", RemoteCreatedAt: at}
+	older := platform.ProviderMessage{ID: "mid.older", Direction: "inbound", AuthorRemoteID: "reader", Body: "guide", RemoteCreatedAt: known.Add(-time.Hour)}
+	require.NoError(t, f.s.persistHistoryPage(t.Context(), f.account, before, platform.FetchMessageHistoryResult{Messages: []platform.ProviderMessage{arrived, older}}))
+	imported := func() []string {
+		ids := []string{}
+		require.NoError(t, f.db.NewSelect().TableExpr("message_history_imports AS h").Join("JOIN direct_messages AS d ON d.id = h.message_id").ColumnExpr("d.remote_message_id").Scan(t.Context(), &ids))
+		return ids
+	}
+	assert.Equal(t, []string{"mid.older"}, imported(), "only what the conversation already passed is history")
+	var after models.Conversation
+	require.NoError(t, f.db.NewSelect().Model(&after).Where("id = 'conversation'").Scan(t.Context()))
+	assert.True(t, after.LastMessageAt.Equal(at))
+	assert.True(t, after.MessagingWindowExpiresAt.Equal(at.Add(24*time.Hour)), "a closed window would consume the message with no run")
+	assert.Equal(t, before.UnreadCount+1, after.UnreadCount)
+	require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", inboundEvent("mid.arrived", "guide", at)))
+	assert.Equal(t, []string{"mid.older"}, imported())
+	require.NoError(t, f.db.NewSelect().Model(&after).Where("id = 'conversation'").Scan(t.Context()))
+	assert.Equal(t, before.UnreadCount+1, after.UnreadCount, "the late webhook does not count it twice")
+}
+
+func TestHistoryIsNotNewWithNoKnownLastMessage(t *testing.T) {
+	f := newAutomationFixture(t)
+	_, err := f.db.NewUpdate().Model((*models.Conversation)(nil)).Set("last_message_at = ?", time.Time{}).Where("id = 'conversation'").Exec(t.Context())
+	require.NoError(t, err)
+	var conversation models.Conversation
+	require.NoError(t, f.db.NewSelect().Model(&conversation).Where("id = 'conversation'").Scan(t.Context()))
+	require.True(t, conversation.LastMessageAt.IsZero())
+	require.NoError(t, f.s.persistHistoryPage(t.Context(), f.account, conversation, platform.FetchMessageHistoryResult{Messages: []platform.ProviderMessage{{ID: "mid.unknown", Direction: "inbound", AuthorRemoteID: "reader", Body: "guide", RemoteCreatedAt: *f.now}}}))
+	marks, err := f.db.NewSelect().Table("message_history_imports").Count(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, 1, marks)
+}
+
 func TestOnlyMessagesFirstStoredFromHistoryAreMarked(t *testing.T) {
 	f := newAutomationFixture(t)
 	var conversation models.Conversation
@@ -709,9 +807,9 @@ func TestOnlyMessagesFirstStoredFromHistoryAreMarked(t *testing.T) {
 		return ids
 	}
 	inbound := func(id string) platform.ProviderMessage {
-		return platform.ProviderMessage{ID: id, Direction: "inbound", AuthorRemoteID: "reader", Body: "guide", RemoteCreatedAt: *f.now}
+		return platform.ProviderMessage{ID: id, Direction: "inbound", AuthorRemoteID: "reader", Body: "guide", RemoteCreatedAt: f.now.Add(-time.Hour)}
 	}
-	require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", inboundEvent("mid.live", "guide", *f.now)))
+	require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", inboundEvent("mid.live", "guide", f.now.Add(-time.Hour))))
 	page := platform.FetchMessageHistoryResult{Messages: []platform.ProviderMessage{inbound("mid.live"), inbound("mid.history")}}
 	require.NoError(t, f.s.persistHistoryPage(t.Context(), f.account, conversation, page))
 	require.Equal(t, []string{"mid.history"}, imported(), "a message polling stored first stays eligible")
