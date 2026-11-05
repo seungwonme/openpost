@@ -180,6 +180,8 @@ func (s *Service) readPolledSource(ctx context.Context, record workflowRecord, s
 	switch source.Kind {
 	case "comment_received":
 		items, err = s.commentItems(ctx, record.WorkspaceID, source, since, &record)
+	case "message_received":
+		items, err = s.messageItems(ctx, record.WorkspaceID, source, since, &record)
 	case "publication_created":
 		items, err = s.publicationItems(ctx, record.WorkspaceID, since, &record)
 	case "rendition_failed":
@@ -263,7 +265,7 @@ func (s *Service) pollError(ctx context.Context, record workflowRecord, leaseUnt
 }
 
 func sourceEventKey(kind, id string) (string, error) {
-	if kind == "rendition_published" || kind == "publication_created" || kind == "rendition_failed" || kind == "comment_received" {
+	if kind == "rendition_published" || kind == "publication_created" || kind == "rendition_failed" || isInteractionSource(kind) {
 		return id, nil
 	}
 	return idempotency.Hash([]string{kind, id})
@@ -280,7 +282,7 @@ func sourceItemValues(item SourceItem) (map[string]any, error) {
 }
 
 func commentDailyLimitReached(ctx context.Context, db bun.IDB, record workflowRecord, def Definition, now time.Time) (bool, error) {
-	if def.Source.Kind != "comment_received" {
+	if !isInteractionSource(def.Source.Kind) {
 		return false, nil
 	}
 	count, err := db.NewSelect().Model((*runRecord)(nil)).Where("workflow_id = ? AND mode = ? AND created_at >= ?", record.ID, ModeLive, now.Truncate(24*time.Hour)).Count(ctx)
@@ -313,6 +315,9 @@ func (s *Service) admitSourceEvent(ctx context.Context, tx bun.Tx, record workfl
 		if !winner {
 			return false, nil
 		}
+	}
+	if def.Source.Kind == "message_received" {
+		return s.messageWorkflowWins(ctx, tx, record, item.ID)
 	}
 	return true, nil
 }

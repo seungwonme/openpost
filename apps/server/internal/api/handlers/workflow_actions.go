@@ -11,6 +11,7 @@ import (
 	"github.com/openpost/backend/internal/idempotency"
 	analyticsservice "github.com/openpost/backend/internal/services/analytics"
 	"github.com/openpost/backend/internal/services/engagement"
+	"github.com/openpost/backend/internal/services/messaging"
 	"github.com/openpost/backend/internal/services/providerreadiness"
 	"github.com/openpost/backend/internal/services/publicationauth"
 	"github.com/openpost/backend/internal/services/publicationbuilder"
@@ -20,6 +21,7 @@ import (
 
 type workflowActions struct {
 	engagement   *engagement.Service
+	messaging    *messaging.Service
 	publications *PublicationHandler
 	builds       *PublicationBuildHandler
 	analytics    *analyticsservice.Service
@@ -48,6 +50,8 @@ func (a workflowActions) Execute(ctx context.Context, input workflows.EffectRequ
 		output, err = a.schedule(ctx, input)
 	case workflows.KindCommentReply, workflows.KindPrivateReply, workflows.KindCommentHandoff:
 		return a.commentReply(ctx, input)
+	case workflows.KindMessageReply:
+		return a.messageReply(ctx, input)
 	case workflows.KindReply:
 		output, err = a.reply(ctx, input)
 	case workflows.KindMetrics:
@@ -303,6 +307,9 @@ func NewWorkflowActionsWithEngagement(publications *PublicationHandler, builds *
 	return workflowActions{publications: publications, builds: builds, analytics: analytics, engagement: inbox}
 }
 func (a workflowActions) StopReplies(ctx context.Context, authority workspaceaccess.StoredAuthority, workflowID, runID string) error {
+	if err := a.stopWorkflowMessages(ctx, authority, workflowID, runID); err != nil {
+		return err
+	}
 	if a.engagement == nil {
 		return nil
 	}

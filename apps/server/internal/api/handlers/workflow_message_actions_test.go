@@ -1,0 +1,266 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humaecho"
+	"github.com/labstack/echo/v4"
+	"github.com/openpost/backend/internal/jobregistry"
+	"github.com/openpost/backend/internal/models"
+	"github.com/openpost/backend/internal/platform"
+	"github.com/openpost/backend/internal/services/messaging"
+	"github.com/openpost/backend/internal/services/workflows"
+	"github.com/openpost/backend/internal/services/workspaceaccess"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
+)
+
+type dmGate struct{}
+
+func (dmGate) IsEffectiveEnabled(context.Context, string, string) (bool, error) { return true, nil }
+
+type dmToken struct{}
+
+func (dmToken) GetValidAccessToken(context.Context, string) (string, error) { return "token", nil }
+
+type dmProvider struct {
+	sent *[]platform.SendMessageRequest
+	send func(platform.SendMessageRequest) (platform.SendMessageResult, error)
+}
+
+func (dmProvider) MessagingSupport() platform.MessagingSupport {
+	return platform.MessagingSupport{Enabled: true, CanSend: true, ReplyWindow: 24 * time.Hour}
+}
+func (dmProvider) FetchMessages(context.Context, string, platform.FetchMessagesRequest) (platform.FetchMessagesResult, error) {
+	return platform.FetchMessagesResult{}, nil
+}
+func (p dmProvider) SendMessage(_ context.Context, _ string, request platform.SendMessageRequest) (platform.SendMessageResult, error) {
+	*p.sent = append(*p.sent, request)
+	if p.send != nil {
+		return p.send(request)
+	}
+	return platform.SendMessageResult{RemoteMessageID: "sent-remote-id"}, nil
+}
+
+type dmHarness struct {
+	db       *bun.DB
+	inbox    *messaging.Service
+	service  *workflows.Service
+	sent     *[]platform.SendMessageRequest
+	actor    workspaceaccess.ActorFacts
+	workflow workflows.Workflow
+}
+
+func newDMHarness(t *testing.T, steps []workflows.Step) *dmHarness {
+	t.Helper()
+	db := workflowHandlerDB(t)
+	now := time.Now().UTC()
+	account := models.SocialAccount{ID: "ig", WorkspaceID: "ws", Platform: "instagram", AccountID: "owner", Slug: "ig", AccessTokenEnc: []byte("token"), IsActive: true, CreatedAt: now}
+	_, err := db.NewInsert().Model(&account).Exec(t.Context())
+	require.NoError(t, err)
+	inbox := messaging.NewService(db, dmToken{}, nil)
+	inbox.SetFeatureGate(dmGate{})
+	sent := []platform.SendMessageRequest{}
+	inbox.SetProvider("instagram", dmProvider{sent: &sent})
+	actions := NewWorkflowActionsWithInbox(NewPublicationHandler(db, workflowSession{}, nil), nil, nil, nil, inbox)
+	service := workflows.NewService(db, actions, nil)
+	inbox.SetAutomationRunStopper(service.CancelMessageAutomationRuns)
+	h := &dmHarness{db: db, inbox: inbox, service: service, sent: &sent, actor: workspaceaccess.ActorFacts{UserID: "user", SessionID: "session"}}
+	def := workflows.Definition{Schema: 1, Source: workflows.Source{Kind: "message_received", AccountIDs: []string{"ig"}, Keywords: []string{"guide"}, MatchMode: "word", DailyLimit: 20}, Steps: steps}
+	saved, err := service.Save(t.Context(), h.actor, "ws", "", workflows.SaveRequest{Name: "Guide", Definition: def})
+	require.NoError(t, err)
+	h.workflow, err = service.Publish(t.Context(), h.actor, "ws", saved.ID, saved.Revision)
+	require.NoError(t, err)
+	return h
+}
+
+func dmReplyStep(delivery string) workflows.Step {
+	return workflows.Step{ID: "reply", Kind: workflows.KindMessageReply, Name: "Reply", Inputs: map[string]workflows.Value{"message_id": {Reference: "source.message_id"}, "text": {Literal: "Here is the guide, {{source.author_name}}"}, "delivery": {Literal: delivery}}}
+}
+
+func dmEvent(id, direction, author, body string, at time.Time) platform.FetchMessageEventsResult {
+	conversation := platform.ProviderConversation{ID: "thread", CounterpartRemoteID: "reader", CounterpartName: "Sample reader", LastMessageAt: at, Messages: []platform.ProviderMessage{{ID: id, Direction: direction, AuthorRemoteID: author, Body: body, RemoteCreatedAt: at}}}
+	if direction == "inbound" {
+		conversation.ReplyWindowExpiresAt = at.Add(24 * time.Hour)
+	}
+	return platform.FetchMessageEventsResult{Conversations: []platform.ProviderConversation{conversation}}
+}
+
+func (h *dmHarness) poll(t *testing.T) {
+	t.Helper()
+	require.NoError(t, h.service.HandleJob(t.Context(), jobregistry.TypeWorkflowPoll, `{"workflow_id":"`+h.workflow.ID+`"}`))
+}
+
+func (h *dmHarness) runs(t *testing.T) []workflows.Run {
+	t.Helper()
+	runs, err := h.service.Runs(t.Context(), h.actor, "ws", h.workflow.ID)
+	require.NoError(t, err)
+	return runs
+}
+
+// advance runs one workflow job, ignoring the timer the test has no reason to wait for.
+func (h *dmHarness) advance(t *testing.T, runID string) workflows.Run {
+	t.Helper()
+	_, err := h.db.NewRaw(`UPDATE workflow_runs SET wake_at = NULL WHERE id = ?`, runID).Exec(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, h.service.HandleJob(t.Context(), jobregistry.TypeWorkflowRun, `{"run_id":"`+runID+`"}`))
+	run, err := h.service.GetRun(t.Context(), h.actor, "ws", runID)
+	require.NoError(t, err)
+	return run
+}
+
+func (h *dmHarness) sendQueued(t *testing.T) {
+	t.Helper()
+	var ids []string
+	require.NoError(t, h.db.NewSelect().Model((*models.DirectMessage)(nil)).Column("id").Where("direction = 'outbound' AND send_status = 'queued'").Scan(t.Context(), &ids))
+	for _, id := range ids {
+		require.NoError(t, h.inbox.HandleJob(t.Context(), messaging.JobTypeMessageSend, `{"id":"`+id+`"}`))
+	}
+}
+
+func TestDMCampaignAnswersDuplicateWebhooksOnce(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmReplyStep("automatic")})
+	at := time.Now().UTC().Add(time.Second)
+	event := dmEvent("mid.1", "inbound", "reader", "guide please", at)
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", event))
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", event))
+	// An echo of anything the account sent starts nothing.
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.echo", "outbound", "owner", "guide", at)))
+	h.poll(t)
+	h.poll(t)
+	runs := h.runs(t)
+	require.Len(t, runs, 1)
+
+	run := h.advance(t, runs[0].ID)
+	require.Equal(t, workflows.StateWaiting, run.State, "the run waits for its durable delivery")
+	h.sendQueued(t)
+	require.Len(t, *h.sent, 1)
+	assert.Equal(t, "reader", (*h.sent)[0].CounterpartRemoteID)
+	assert.Equal(t, "Here is the guide, Sample reader", (*h.sent)[0].Body)
+
+	run = h.advance(t, run.ID)
+	assert.Equal(t, workflows.StateSucceeded, run.State)
+	assert.Equal(t, "sent", run.Steps[0].Output["status"])
+	h.poll(t)
+	assert.Len(t, h.runs(t), 1)
+	assert.Len(t, *h.sent, 1)
+}
+
+func TestDMCampaignReviewEditsThenSends(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmReplyStep("review")})
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.1", "inbound", "reader", "guide", time.Now().UTC().Add(time.Second))))
+	h.poll(t)
+	run := h.advance(t, h.runs(t)[0].ID)
+	require.Equal(t, workflows.StateApproval, run.State)
+	require.Empty(t, *h.sent)
+	run, err := h.service.Approve(t.Context(), h.actor, "ws", run.ID, run.Revision, 0, "Edited guide")
+	require.NoError(t, err)
+	require.Equal(t, workflows.StateQueued, run.State)
+	require.Empty(t, *h.sent, "approval hands the send to the durable queue")
+	run = h.advance(t, run.ID)
+	require.Equal(t, workflows.StateWaiting, run.State)
+	h.sendQueued(t)
+	require.Len(t, *h.sent, 1)
+	assert.Equal(t, "Edited guide", (*h.sent)[0].Body)
+	assert.Equal(t, workflows.StateSucceeded, h.advance(t, run.ID).State)
+}
+
+func TestDMReviewApprovedAfterTheWindowClosedFailsVisibly(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmReplyStep("review")})
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.1", "inbound", "reader", "guide", time.Now().UTC().Add(time.Second))))
+	h.poll(t)
+	run := h.advance(t, h.runs(t)[0].ID)
+	require.Equal(t, workflows.StateApproval, run.State)
+	_, err := h.db.NewUpdate().Model((*models.Conversation)(nil)).Set("messaging_window_expires_at=?", time.Now().UTC().Add(-time.Minute)).Where("social_account_id='ig'").Exec(t.Context())
+	require.NoError(t, err)
+	run, err = h.service.Approve(t.Context(), h.actor, "ws", run.ID, run.Revision, 0, "Late answer")
+	require.NoError(t, err)
+	assert.Equal(t, workflows.StateFailed, run.State)
+	assert.Contains(t, run.Error, "messaging window closed")
+	assert.Empty(t, *h.sent)
+}
+
+func TestDMTakeoverCancelsTheRunWithItsReason(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmReplyStep("review")})
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.1", "inbound", "reader", "guide", time.Now().UTC().Add(time.Second))))
+	h.poll(t)
+	run := h.advance(t, h.runs(t)[0].ID)
+	require.Equal(t, workflows.StateApproval, run.State)
+
+	var conversationID string
+	require.NoError(t, h.db.NewSelect().Model((*models.Conversation)(nil)).Column("id").Where("social_account_id='ig'").Scan(t.Context(), &conversationID))
+	require.NoError(t, h.inbox.StopConversationAutomation(t.Context(), h.actor, "ws", conversationID))
+
+	run, err := h.service.GetRun(t.Context(), h.actor, "ws", run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, workflows.StateCancelled, run.State)
+	assert.Contains(t, run.Error, "took over")
+	_, err = h.service.Approve(t.Context(), h.actor, "ws", run.ID, run.Revision, 0, "Too late")
+	require.ErrorIs(t, err, workflows.ErrState)
+	assert.Empty(t, *h.sent)
+}
+
+func TestDMDelayedStepStopsWhenTheWindowClosesDuringAWait(t *testing.T) {
+	wait := workflows.Step{ID: "wait", Kind: workflows.KindWait, Name: "Wait", Inputs: map[string]workflows.Value{"minutes": {Literal: 0}}}
+	h := newDMHarness(t, []workflows.Step{wait, dmReplyStep("automatic")})
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.1", "inbound", "reader", "guide", time.Now().UTC().Add(time.Second))))
+	h.poll(t)
+	run := h.advance(t, h.runs(t)[0].ID)
+	_, err := h.db.NewUpdate().Model((*models.Conversation)(nil)).Set("messaging_window_expires_at=?", time.Now().UTC().Add(-time.Minute)).Where("social_account_id='ig'").Exec(t.Context())
+	require.NoError(t, err)
+	run = h.advance(t, run.ID)
+	assert.Equal(t, workflows.StateFailed, run.State)
+	assert.Contains(t, run.Error, "messaging window closed")
+	assert.Empty(t, *h.sent)
+}
+
+func TestDMActivationChecksTheAccount(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmReplyStep("review")})
+	_, err := h.db.NewUpdate().Model((*models.SocialAccount)(nil)).Set("platform='bluesky'").Where("id='ig'").Exec(t.Context())
+	require.NoError(t, err)
+	current, err := h.service.Get(t.Context(), h.actor, "ws", h.workflow.ID)
+	require.NoError(t, err)
+	paused, err := h.service.Pause(t.Context(), h.actor, "ws", current.ID, current.Revision)
+	require.NoError(t, err)
+	_, err = h.service.Publish(t.Context(), h.actor, "ws", paused.ID, paused.Revision)
+	require.ErrorContains(t, err, "Instagram only")
+}
+
+func TestDMAutomationHTTPTakeoverAndResume(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmReplyStep("review")})
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.1", "inbound", "reader", "guide", time.Now().UTC().Add(time.Second))))
+	h.poll(t)
+	h.advance(t, h.runs(t)[0].ID)
+	var conversationID string
+	require.NoError(t, h.db.NewSelect().Model((*models.Conversation)(nil)).Column("id").Where("social_account_id='ig'").Scan(t.Context(), &conversationID))
+
+	e := echo.New()
+	api := humaecho.NewWithGroup(e, e.Group("/api/v1"), huma.DefaultConfig("Test", "1"))
+	NewEngagementMessagingHandler(workflowSession{}, h.inbox, nil).registerMessageAutomation(api)
+	call := func(method, path string) messaging.ConversationAutomation {
+		req := httptest.NewRequestWithContext(t.Context(), method, "/api/v1/messages/"+conversationID+"/automation"+path+"?workspace_id=ws", nil)
+		req.Header.Set("Authorization", "Bearer session")
+		response := httptest.NewRecorder()
+		e.ServeHTTP(response, req)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		var state messaging.ConversationAutomation
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &state))
+		return state
+	}
+	state := call(http.MethodGet, "")
+	require.Len(t, state.Replies, 1)
+	assert.Equal(t, messaging.AutomationAwaitingReview, state.Replies[0].State)
+	assert.Nil(t, state.StoppedAt)
+	state = call(http.MethodPost, "/stop")
+	assert.NotNil(t, state.StoppedAt)
+	assert.Equal(t, messaging.AutomationCancelled, state.Replies[0].State)
+	state = call(http.MethodPost, "/resume")
+	assert.Nil(t, state.StoppedAt)
+}

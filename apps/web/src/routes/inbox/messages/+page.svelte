@@ -37,6 +37,7 @@
 	import { getLocaleTag } from '$lib/i18n';
 	import { getPlatformName } from '$lib/utils';
 	import InboxUpdates from '$lib/components/inbox-updates.svelte';
+	import MessageAutomation from '$lib/workflows/message-automation.svelte';
 	import PageContainer from '$lib/components/page-container.svelte';
 	import CommunicationsNavigation from '$lib/components/communications-navigation.svelte';
 	import SocialAccountAvatar from '$lib/components/social-account-avatar.svelte';
@@ -1294,6 +1295,9 @@
 							</div>
 						{/if}
 						{#if !loadingMessages && !messageError}
+							{#if selected.platform === 'instagram'}<div class="border-t p-3 sm:p-4">
+									<MessageAutomation workspaceID={workspaceId} conversationID={selected.id} />
+								</div>{/if}
 							<div class="border-t p-3 sm:p-4" data-testid="conversation-reply-composer">
 								{#if sendUncertain}<InlineNotice
 										tone="warning"

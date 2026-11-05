@@ -1418,6 +1418,22 @@ export const docsPageCatalog = Object.freeze([
     }
   },
   {
+    "page": "self-hosting/macbook-macmini.mdx",
+    "title": "Develop on a MacBook, run on a Mac mini",
+    "description": "Keep OpenPost development local and move one verified instance to a persistent Mac mini server.",
+    "route": "/self-hosting/macbook-macmini",
+    "agentRepresentation": {
+      "membership": "ordinary"
+    },
+    "agentDiscovery": {
+      "membership": "unlisted"
+    },
+    "agentCorpus": {
+      "membership": "included",
+      "section": "self-hosting"
+    }
+  },
+  {
     "page": "self-hosting/maintenance.mdx",
     "title": "Maintenance",
     "description": "Back up, upgrade, monitor, and recover a self-hosted instance.",
@@ -1727,6 +1743,22 @@ export const docsPageCatalog = Object.freeze([
     "title": "Prepare a weekly feed digest",
     "description": "Collect several feed articles into one draft for review.",
     "route": "/workflows/examples/feed-digest",
+    "agentRepresentation": {
+      "membership": "ordinary"
+    },
+    "agentDiscovery": {
+      "membership": "unlisted"
+    },
+    "agentCorpus": {
+      "membership": "included",
+      "section": "workflows"
+    }
+  },
+  {
+    "page": "workflows/examples/instagram-dm-reply.mdx",
+    "title": "Reply to Instagram messages",
+    "description": "Answer an Instagram direct message that contains your keyword, once, while the messaging window is open.",
+    "route": "/workflows/examples/instagram-dm-reply",
     "agentRepresentation": {
       "membership": "ordinary"
     },

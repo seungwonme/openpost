@@ -292,7 +292,7 @@ func decodeWorkflow(record workflowRecord) (Workflow, error) {
 	if err := json.Unmarshal([]byte(record.PublishedJSON), &published); err != nil {
 		return Workflow{}, fmt.Errorf("decode published workflow: %w", err)
 	}
-	item.HasCommentReplies = published.Source.Kind == "comment_received" || commentResponseSteps(published.Steps)
+	item.HasCommentReplies = isInteractionSource(published.Source.Kind) || commentResponseSteps(published.Steps) || messageResponseSteps(published.Steps)
 	return item, nil
 }
 
@@ -345,7 +345,7 @@ func (s *Service) StopReplies(ctx context.Context, actor workspaceaccess.ActorFa
 	if err := json.Unmarshal([]byte(record.PublishedJSON), &published); err != nil {
 		return Workflow{}, err
 	}
-	if current.Definition.Source.Kind != "comment_received" && published.Source.Kind != "comment_received" {
+	if !isInteractionSource(current.Definition.Source.Kind) && !isInteractionSource(published.Source.Kind) {
 		return Workflow{}, invalid("this workflow does not automate comment replies")
 	}
 	item, err := s.Pause(ctx, actor, workspaceID, id, expected)
@@ -371,11 +371,11 @@ func (s *Service) validateCommentAutomation(ctx context.Context, authority works
 			}
 		}
 	}
-	return nil
+	return s.validateMessageAutomationAccess(ctx, authority, definition)
 }
 
 func workflowSourceInitialized(record workflowRecord, definition Definition, fingerprint string) bool {
-	return record.SourceInitialized && record.SourceFingerprint == fingerprint && (record.Enabled || definition.Source.Kind != "comment_received")
+	return record.SourceInitialized && record.SourceFingerprint == fingerprint && (record.Enabled || !isInteractionSource(definition.Source.Kind))
 }
 
 func (s *Service) cancelWorkflowReplyRuns(ctx context.Context, workspaceID, workflowID string) error {

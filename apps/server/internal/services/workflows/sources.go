@@ -48,6 +48,9 @@ type WorkflowSourceItem struct {
 	PublicationID string  `json:"publication_id,omitempty"`
 	RenditionID   string  `json:"rendition_id,omitempty"`
 	AccountID     string  `json:"account_id,omitempty"`
+
+	MessageID      string `json:"message_id,omitempty"`
+	ConversationID string `json:"conversation_id,omitempty"`
 }
 
 func (s *Service) Sample(ctx context.Context, actor workspaceaccess.ActorFacts, workspaceID string, source Source) ([]SourceItem, error) {
@@ -71,6 +74,8 @@ func (s *Service) readSource(ctx context.Context, workspaceID string, source Sou
 	switch source.Kind {
 	case "comment_received":
 		return s.commentItems(ctx, workspaceID, source, since, nil)
+	case "message_received":
+		return s.messageItems(ctx, workspaceID, source, since, nil)
 	case "interval":
 		return intervalItems(source, since)
 	case "publication_created":

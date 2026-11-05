@@ -171,3 +171,17 @@ export function takeOverComment(ws: string, id: string) {
 		})
 	);
 }
+export function takeOverConversation(ws: string, conversationID: string) {
+	return mutation(ws, () =>
+		client.POST('/messages/{conversation_id}/automation/stop', {
+			params: { query: { workspace_id: ws }, path: { conversation_id: conversationID } }
+		})
+	);
+}
+export function resumeConversationAutomation(ws: string, conversationID: string) {
+	return mutation(ws, () =>
+		client.POST('/messages/{conversation_id}/automation/resume', {
+			params: { query: { workspace_id: ws }, path: { conversation_id: conversationID } }
+		})
+	);
+}

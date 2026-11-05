@@ -677,10 +677,13 @@ func registerWorkflowRoutes(api huma.API, deps RouteDeps, publicationHandler *ha
 	if workflowService == nil {
 		workflowService = workflows.NewService(deps.DB, nil, deps.TokenEncryptor)
 	}
-	workflowService.SetActions(handlers.NewWorkflowActionsWithEngagement(publicationHandler, publicationBuildHandler, deps.AnalyticsService, deps.EngagementService))
+	workflowService.SetActions(handlers.NewWorkflowActionsWithInbox(publicationHandler, publicationBuildHandler, deps.AnalyticsService, deps.EngagementService, deps.MessagingService))
 	workflowService.SetNotificationService(deps.NotificationService)
 	if deps.EngagementService != nil {
 		deps.EngagementService.SetAutomationRunStopper(workflowService.CancelCommentReplyRuns)
+	}
+	if deps.MessagingService != nil {
+		deps.MessagingService.SetAutomationRunStopper(workflowService.CancelMessageAutomationRuns)
 	}
 	handlers.NewWorkflowHandler(workflowService, deps.Authenticator).RegisterRoutes(api)
 }

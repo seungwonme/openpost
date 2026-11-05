@@ -5,6 +5,7 @@
 	import type { Source, Connection } from './api';
 	import Choice from './choice.svelte';
 	import CommentSourceFields from './comment-source-fields.svelte';
+	import MessageSourceFields from './message-source-fields.svelte';
 	import Field from './field.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -43,6 +44,7 @@
 			value={source.kind}
 			options={[
 				{ value: 'comment_received', label: m.workflows_comment_received() },
+				{ value: 'message_received', label: m.workflows_message_received() },
 				{ value: 'manual', label: m.workflows_manual() },
 				{ value: 'interval', label: m.workflows_interval() },
 				{ value: 'publication_created', label: m.workflows_post_created() },
@@ -57,11 +59,18 @@
 					...(kind === 'comment_received'
 						? { account_ids: [], daily_limit: 20, match_mode: 'word', post_scope: 'all' }
 						: {}),
+					...(kind === 'message_received'
+						? { account_ids: [], daily_limit: 100, match_mode: 'word' }
+						: {}),
 					...(kind === 'interval' ? { interval_minutes: 1440 } : {})
 				})}
 		/>
 	</div>
 	{#if source.kind === 'comment_received'}<CommentSourceFields
+			{source}
+			{accounts}
+			{onchange}
+		/>{:else if source.kind === 'message_received'}<MessageSourceFields
 			{source}
 			{accounts}
 			{onchange}

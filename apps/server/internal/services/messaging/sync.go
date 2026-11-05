@@ -233,6 +233,9 @@ func (s *Service) persistConversationWithDB(ctx context.Context, tx bun.IDB, acc
 			}
 			changes = append(changes, inboxchanges.Change{Kind: "message", ConversationID: conversationID, MessageID: localID})
 			if rm.Direction == "inbound" {
+				if err = s.recordMessageOptOut(ctx, tx, account, conversationID, remote.CounterpartRemoteID, rm); err != nil {
+					return nil, nil, err
+				}
 				newInbound++
 				received = append(received, receivedMessage{conversationID: conversationID, messageID: rm.ID, senderName: firstNonEmpty(remote.CounterpartName, remote.CounterpartHandle, "a social account"), provider: account.Platform})
 			}

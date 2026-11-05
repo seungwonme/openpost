@@ -57,6 +57,17 @@ export function stepFields(kind: Step['kind'], inputs?: Step['inputs']): FieldSp
 			text,
 			field('instructions', m.workflows_instructions(), { multiline: true })
 		],
+		message_reply: () => [
+			field('message_id', m.workflows_message_id(), required),
+			field('text', m.workflows_comment_saved(), { ...required, multiline: true }),
+			field('delivery', m.workflows_comment_delivery(), {
+				...required,
+				options: [
+					{ value: 'review', label: m.workflows_comment_review() },
+					{ value: 'automatic', label: m.workflows_comment_automatic() }
+				]
+			})
+		],
 		comment_handoff: () => [field('engagement_id', m.workflows_comment_id(), required)],
 		private_comment_reply: () => [
 			field('engagement_id', m.workflows_comment_id(), required),
@@ -260,6 +271,7 @@ const outputs = {
 	date: ['text', 'timestamp'],
 	tracking_link: ['url'],
 	schedule: ['publication_id', 'job_id', 'scheduled_at', 'status', 'renditions'],
+	message_reply: ['message_id', 'conversation_id', 'status', 'text', 'reason', 'sent_message_id'],
 	comment_handoff: ['engagement_id', 'status'],
 	private_comment_reply: ['engagement_id', 'job_id', 'status', 'text', 'channel'],
 	comment_reply: ['engagement_id', 'job_id', 'status', 'text', 'channel'],

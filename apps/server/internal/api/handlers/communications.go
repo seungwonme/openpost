@@ -348,6 +348,7 @@ func (h *EngagementMessagingHandler) RegisterRoutes(api huma.API) {
 	h.registerConversationRoutes(api)
 	h.registerRefreshRoutes(api)
 	h.registerInboxFreshnessRoutes(api)
+	h.registerMessageAutomation(api)
 }
 
 func (h *EngagementMessagingHandler) registerEngagementRoutes(api huma.API) {

@@ -18,6 +18,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import ApprovalContent from './approval-content.svelte';
 	import EngagementAutomation from '$lib/components/engagement-automation.svelte';
+	import MessageAutomation from './message-automation.svelte';
 	import { engagementDetailQueryOptions } from '@openpost/query-catalog';
 	import { inboxQueryAPI } from '$lib/query/inbox';
 	import InlineNotice from '$lib/components/inline-notice.svelte';
@@ -162,6 +163,11 @@
 				{m.workflows_waiting()}: {new Date(run.wake_at).toLocaleString()}
 			</p>{/if}
 		{#if comment.data}<EngagementAutomation item={comment.data.item} />{/if}
+		{#if run.source.conversation_id}<MessageAutomation
+				{workspaceID}
+				conversationID={String(run.source.conversation_id)}
+				{runID}
+			/>{/if}
 		{#if publicationID}
 			<section class="space-y-3 rounded-lg border bg-card p-4">
 				<h3 class="text-sm font-medium">{m.workflows_approval()}</h3>

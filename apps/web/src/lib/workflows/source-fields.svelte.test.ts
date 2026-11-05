@@ -89,3 +89,27 @@ it('keeps hidden workflow source accounts when selecting a search result', async
 	await screen.getByRole('checkbox', { name: 'Any compatible source account' }).click();
 	expect(onchange).toHaveBeenLastCalledWith(expect.objectContaining({ account_ids: [] }));
 });
+
+it('offers only Instagram accounts to the message trigger and keeps its limit', async () => {
+	const onchange = vi.fn();
+	const instagram: SocialAccount = {
+		...sourceAccount('account-ig', 'studio'),
+		platform: 'instagram'
+	};
+	const screen = await render(SourceFields, {
+		source: { kind: 'message_received', account_ids: [], daily_limit: 100 },
+		connections: [],
+		accounts: [...accounts, instagram],
+		onchange
+	});
+	const picker = screen.getByRole('button', { name: 'Social accounts' });
+	await picker.click();
+	await expect.element(screen.getByRole('option', { name: 'studio' })).toBeVisible();
+	await expect.element(screen.getByRole('option', { name: 'alice' })).not.toBeInTheDocument();
+	await screen.getByRole('option', { name: 'studio' }).click();
+	expect(onchange).toHaveBeenLastCalledWith({
+		kind: 'message_received',
+		account_ids: ['account-ig'],
+		daily_limit: 100
+	});
+});

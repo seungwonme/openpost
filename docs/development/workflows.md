@@ -91,3 +91,17 @@ Inbox exposes compact stored automation summaries and loads full reply text only
 Signed Instagram comment receipts may hydrate media not authored in OpenPost through the Instagram adapter, then persist it under the current canonical account/grant fence. No synthetic Publication is created. The post picker includes published/scheduled native Publications and imported Instagram inventory. No private reply establishes a new normal messaging window or enables follow-up DMs. New provider-specific interaction triggers require their own canonical ingestion and native action owner before appearing in discovery.
 
 Migration 175 adds reply receipts, private-recipient uniqueness, opt-outs and takeover timestamps. Stop comment workflows before downgrading and retain the additive data for recovery.
+
+## Incoming Instagram messages (fork)
+
+`message_received` reads canonical `direct_messages`, never a provider from a page read. Both the provider creation time and first local storage must follow activation, so imported history never starts a run. Direction, the account's own remote ID, other connected Instagram accounts, deleted messages and opted-out senders are excluded in the source query. A message whose window has already closed enters the admission ledger without starting a run. Overlaps between reply workflows use the comment rule: priority, then the older workflow.
+
+The `message_reply` effect delegates to `services/messaging/automation.go`. `message_automation_replies` owns one delivery per triggering message (`trigger_message_id`) and per run step. A retry reads that receipt and never queues another message. Outbound text goes through `queueMessageWithDB`, the ordinary durable send job and the provider-write fence.
+
+`automationStopCheck` holds the rules a send must still satisfy: Instagram only, account and grant, deleted trigger, opt-out, takeover, a person's later reply, and an open stored window. A missing window counts as closed for automation, unlike manual sending. The check runs at claim, at every step entry, after review, before the job touches the provider, and inside the provider-write fence under the workspace lock. The send job treats any automated message that is no longer `queued` as settled, so a replayed job cannot repeat a rejected or uncertain write. An Inbox retry requeues only a definite rejection and passes the same checks.
+
+A policy stop fails the run with its reason, so the inspector shows why nothing was sent. Losing to another workflow is an ordinary outcome. Takeover (`message_automation_stops`) is a conversation fact that persists until someone resumes automation: the Inbox action, a manual send, or an outbound provider message automation does not own, identified by message ID or by the body of an automated or private reply because an echo can be stored before its send finalizes.
+
+`STOP`, `unsubscribe`, `stop replying` and their Korean equivalents match a whole message, trimmed of surrounding punctuation, and commit to `engagement_automation_optouts` in the same transaction as the message, which also cancels pending replies in that conversation. Comments keep their existing English match. A conversation that reaches five automated replies in an hour stops admitting replies, guarding against two automated accounts answering each other.
+
+A wait literal is added along each path and a send at or past 24 hours fails validation. A reference delay is unknowable, so the dispatch check handles it. Migration 9003 is additive; pause message workflows before downgrading.
