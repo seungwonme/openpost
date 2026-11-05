@@ -24,8 +24,8 @@ const (
 // prepareAutomatedSend reads the conversation from the provider so stops are
 // evaluated on what happened, not on what webhooks and polling have stored. A
 // person's "stop" can be minutes old in the provider before it reaches OpenPost.
-// Nothing automated is sent on stale data: a failed read holds the message. A
-// problem the send itself reports, such as a lost token, is left to the send.
+// Nothing automated is sent on stale data: anything that prevents the read, whether
+// the account, the token or the provider, holds the message.
 func (s *Service) prepareAutomatedSend(ctx context.Context, message models.DirectMessage, conversation models.Conversation) (bool, error) {
 	hold, err := s.sendAutomationHold(ctx, message, conversation)
 	if err != nil || hold {
@@ -35,23 +35,27 @@ func (s *Service) prepareAutomatedSend(ctx context.Context, message models.Direc
 	if err != nil || !owned {
 		return false, err
 	}
-	var account models.SocialAccount
-	if err := s.db.NewSelect().Model(&account).Where("id = ? AND workspace_id = ? AND is_active = ?", conversation.SocialAccountID, conversation.WorkspaceID, true).Scan(ctx); err != nil {
-		return false, nil //nolint:nilerr // The send records this account failure on the message.
-	}
-	provider := s.provider(account)
-	if provider == nil {
-		return false, nil
-	}
-	token, err := s.messagingToken(ctx, account)
-	if err != nil {
-		return false, nil //nolint:nilerr // The send records this token failure on the message.
-	}
-	if err := s.refreshConversation(ctx, conversation, account, provider, token); err != nil {
+	if err := s.readConversationBeforeSend(ctx, conversation); err != nil {
 		log.Printf("refresh conversation before automated send: %v", err)
 		return true, s.holdAutomatedSend(ctx, message, conversation)
 	}
 	return s.sendAutomationHold(ctx, message, conversation)
+}
+
+func (s *Service) readConversationBeforeSend(ctx context.Context, conversation models.Conversation) error {
+	var account models.SocialAccount
+	if err := s.db.NewSelect().Model(&account).Where("id = ? AND workspace_id = ? AND is_active = ?", conversation.SocialAccountID, conversation.WorkspaceID, true).Scan(ctx); err != nil {
+		return err
+	}
+	provider := s.provider(account)
+	if provider == nil {
+		return errors.New("this account has no messaging provider")
+	}
+	token, err := s.messagingToken(ctx, account)
+	if err != nil {
+		return err
+	}
+	return s.refreshConversation(ctx, conversation, account, provider, token)
 }
 
 func (s *Service) refreshConversation(ctx context.Context, conversation models.Conversation, account models.SocialAccount, provider Provider, token string) error {

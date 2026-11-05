@@ -17,6 +17,7 @@ import (
 	"github.com/openpost/backend/internal/jobregistry"
 	"github.com/openpost/backend/internal/models"
 	"github.com/openpost/backend/internal/platform"
+	"github.com/openpost/backend/internal/services/automationoptout"
 	"github.com/openpost/backend/internal/services/dataretention"
 	"github.com/openpost/backend/internal/services/lifecycle"
 	"github.com/openpost/backend/internal/services/notifications"
@@ -586,7 +587,8 @@ func persistEngagementComment(
 		return models.EngagementItem{}, false, err
 	}
 	if comment.AuthorID != "" && (strings.EqualFold(strings.TrimSpace(comment.Text), "stop") || strings.EqualFold(strings.TrimSpace(comment.Text), "unsubscribe") || strings.EqualFold(strings.TrimSpace(comment.Text), "stop replying")) {
-		if _, err := tx.NewRaw("INSERT INTO engagement_automation_optouts(social_account_id,author_remote_id,created_at) VALUES(?,?,?) ON CONFLICT DO NOTHING", account.ID, comment.AuthorID, now).Exec(ctx); err != nil {
+		requestedAt, _ := time.Parse(time.RFC3339, comment.CreatedAt)
+		if _, err := automationoptout.Record(ctx, tx, account.ID, comment.AuthorID, requestedAt, now); err != nil {
 			return models.EngagementItem{}, false, err
 		}
 	}
@@ -1340,11 +1342,16 @@ func (s *Service) hydrateEngagementProviderURLs(ctx context.Context, items []mod
 	if err != nil {
 		return err
 	}
+	optedOut, err := s.loadOptedOutAuthors(ctx, items)
+	if err != nil {
+		return err
+	}
 	for index := range items {
 		if reply, ok := autoByItem[items[index].ID]; ok {
 			items[index].AutomationState = reply.State
 			items[index].AutomationRunID = reply.RunID
 		}
+		items[index].AuthorOptedOut = optedOut[items[index].SocialAccountID+"\x00"+items[index].AuthorRemoteID]
 		if operation, found := operations[items[index].ID]; found {
 			items[index].ReplyJobID, items[index].ReplyOperationState = operation.JobID, operation.State
 		}

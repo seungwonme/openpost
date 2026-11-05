@@ -276,7 +276,7 @@ func TestOptOutMessageRecordsTheSharedOptOutAndStopsPendingWork(t *testing.T) {
 
 func TestOrdinarySentencesAreNotOptOuts(t *testing.T) {
 	for _, body := range []string{"stop by the shop", "please don't stop", "그만큼 좋아요"} {
-		assert.False(t, messageRequestsOptOut(body), body)
+		assert.Equal(t, optOutNone, classifyOptOut(body), body)
 	}
 }
 

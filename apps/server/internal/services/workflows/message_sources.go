@@ -19,8 +19,14 @@ import (
 // delay can never reach a send, so it is rejected before activation.
 const messageWindowMinutes = 24 * 60
 
-// One person cannot use up a workflow's daily limit for everyone else.
+// One person cannot use up a workflow's daily limit for everyone else, or keep paid
+// steps running. Every run counts toward this, whatever it went on to do.
 const maxMessageRunsPerSender = 5
+
+const (
+	stopReasonSenderLimit = "This person reached this workflow's daily limit, so this message did not start it."
+	messageDailyLimitNote = "This workflow reached its daily run limit. Later messages wait until tomorrow."
+)
 
 // MessageSourceValidator checks connected-account readiness at activation.
 type MessageSourceValidator interface {
@@ -77,7 +83,7 @@ type messageSourceRow struct {
 
 func messageSourceQuery(db bun.IDB, workspaceID string) *bun.SelectQuery {
 	return db.NewSelect().TableExpr("direct_messages AS d").
-		ColumnExpr("d.id, d.conversation_id, c.social_account_id, d.body, d.remote_created_at, d.created_at, c.counterpart_name, c.counterpart_handle, c.messaging_window_expires_at AS window_expires_at, EXISTS (SELECT 1 FROM message_automation_stops s WHERE s.conversation_id = d.conversation_id) AS taken_over").
+		ColumnExpr("d.id, d.conversation_id, c.social_account_id, d.body, d.remote_created_at, d.created_at, c.counterpart_name, c.counterpart_handle, c.messaging_window_expires_at AS window_expires_at, EXISTS (SELECT 1 FROM message_automation_stops s WHERE s.conversation_id = d.conversation_id AND (s.lapses_at IS NULL OR s.lapses_at > ?)) AS taken_over", time.Now().UTC()).
 		Join("JOIN conversations AS c ON c.id = d.conversation_id").
 		Join("JOIN social_accounts AS a ON a.id = c.social_account_id").
 		Where("d.workspace_id = ? AND c.platform = 'instagram' AND d.direction = 'inbound' AND d.deleted_at IS NULL AND d.remote_message_id <> ''", workspaceID).
@@ -331,28 +337,64 @@ func conversationSourcePattern(conversationID string) string {
 }
 
 // countMessageRuns leaves out runs that sent nothing, so a stopped or skipped
-// message does not spend a workflow's daily limit.
-func countMessageRuns(query *bun.SelectQuery) *bun.SelectQuery {
+// message does not spend a workflow's daily limit. A workflow with a paid step spent
+// money whatever the run went on to do, so all of its runs count.
+func countMessageRuns(query *bun.SelectQuery, def Definition) *bun.SelectQuery {
+	query = query.Where("error <> ?", stopReasonSenderLimit)
+	if paidSteps(def.Steps) {
+		return query
+	}
 	return query.Where("state NOT IN (?)", bun.List([]string{StateFailed, StateCancelled})).Where(`results_json NOT LIKE '%"status":"skipped"%'`)
 }
 
+func paidSteps(steps []Step) bool {
+	for _, step := range steps {
+		if step.Kind == KindAIText || step.Kind == KindAIDecision || paidSteps(step.Then) || paidSteps(step.Else) {
+			return true
+		}
+	}
+	return false
+}
+
 func messageSenderLimitReached(ctx context.Context, db bun.IDB, record workflowRecord, conversationID string, now time.Time) (bool, error) {
-	query := db.NewSelect().Model((*runRecord)(nil)).Where("workflow_id = ? AND mode = ? AND created_at >= ?", record.ID, ModeLive, now.Truncate(24*time.Hour)).Where("source_json LIKE ?", conversationSourcePattern(conversationID))
-	count, err := countMessageRuns(query).Count(ctx)
+	count, err := db.NewSelect().Model((*runRecord)(nil)).Where("workflow_id = ? AND mode = ? AND created_at >= ?", record.ID, ModeLive, now.Truncate(24*time.Hour)).Where("source_json LIKE ?", conversationSourcePattern(conversationID)).Where("error <> ?", stopReasonSenderLimit).Count(ctx)
 	return count >= maxMessageRunsPerSender, err
 }
 
-func (s *Service) admitMessageEvent(ctx context.Context, tx bun.Tx, record workflowRecord, item SourceItem, now time.Time) (bool, error) {
+// admitMessageEvent runs before any step, so the limit stops paid steps too. A
+// message over the limit becomes a stopped run with its reason, which is how
+// someone looking at the workflow learns it was not answered.
+func (s *Service) admitMessageEvent(ctx context.Context, tx bun.Tx, record workflowRecord, def Definition, authority workspaceaccess.StoredAuthority, item SourceItem, now time.Time) (bool, error) {
 	wins, err := s.messageWorkflowWins(ctx, tx, record, item.ID)
 	if err != nil || !wins {
 		return false, err
 	}
 	limited, err := messageSenderLimitReached(ctx, tx, record, item.ConversationID, now)
-	return !limited, err
+	if err != nil || !limited {
+		return !limited, err
+	}
+	source, err := sourceItemValues(item)
+	if err != nil {
+		return false, err
+	}
+	run, err := s.createRun(ctx, tx, record, def, authority, ModeLive, source)
+	if err != nil {
+		return false, err
+	}
+	_, err = tx.NewUpdate().Model(&run).Set("state = ?, error = ?, revision = revision + 1, wake_at = NULL, updated_at = ?", StateCancelled, stopReasonSenderLimit, now).WherePK().Exec(ctx)
+	return false, err
 }
 
-// A reviewed message that can no longer be sent ends its run with that reason,
-// so the reviewer sees why their approval did not produce a message.
+// noteMessageDailyLimit shows why later messages are waiting. The poll clears
+// source_error first, so this lasts while the limit does.
+func noteMessageDailyLimit(ctx context.Context, tx bun.Tx, record workflowRecord, def Definition) error {
+	if def.Source.Kind != "message_received" {
+		return nil
+	}
+	_, err := tx.NewUpdate().Model((*workflowRecord)(nil)).Set("source_error = ?", messageDailyLimitNote).Where("id = ?", record.ID).Exec(ctx)
+	return err
+}
+
 // messageRunStoppedDuringReview reports a run that a person's reply or an opt-out
 // cancelled while it waited for approval. Approving it finds that outcome, with its
 // reason, rather than a conflict the reviewer cannot act on.
@@ -372,6 +414,8 @@ func messageRunStoppedDuringReview(record runRecord) (Run, bool) {
 	return Run{}, false
 }
 
+// A reviewed message that can no longer be sent ends its run with that reason,
+// so the reviewer sees why their approval did not produce a message.
 func (s *Service) failReviewedMessageRun(ctx context.Context, actor workspaceaccess.ActorFacts, record runRecord, reason string) (Run, error) {
 	err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if err := organizationguard.LockWorkspace(ctx, tx, record.WorkspaceID); err != nil {

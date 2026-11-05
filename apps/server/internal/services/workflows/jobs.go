@@ -215,8 +215,11 @@ func (s *Service) commitSourcePoll(ctx context.Context, record workflowRecord, d
 			return err
 		}
 		capped, err := commentDailyLimitReached(ctx, tx, record, def, now)
-		if err != nil || capped {
+		if err != nil {
 			return err
+		}
+		if capped {
+			return noteMessageDailyLimit(ctx, tx, record, def)
 		}
 
 		// Admit oldest first so a feed's newest-first presentation does not reverse
@@ -228,7 +231,7 @@ func (s *Service) commitSourcePoll(ctx context.Context, record workflowRecord, d
 				_, err := tx.NewUpdate().Model((*workflowRecord)(nil)).Set("source_page = ?, source_error = ?", record.SourcePage, "workspace has reached 1000 active workflow runs").Where("id = ?", id).Exec(ctx)
 				return err
 			}
-			admit, err := s.admitSourceEvent(ctx, tx, record, def, item, now)
+			admit, err := s.admitSourceEvent(ctx, tx, record, def, authority, item, now)
 			if err != nil {
 				return err
 			}
@@ -249,7 +252,7 @@ func (s *Service) commitSourcePoll(ctx context.Context, record workflowRecord, d
 				return err
 			}
 			if capped {
-				break
+				return noteMessageDailyLimit(ctx, tx, record, def)
 			}
 		}
 		return nil
@@ -287,13 +290,13 @@ func commentDailyLimitReached(ctx context.Context, db bun.IDB, record workflowRe
 	}
 	query := db.NewSelect().Model((*runRecord)(nil)).Where("workflow_id = ? AND mode = ? AND created_at >= ?", record.ID, ModeLive, now.Truncate(24*time.Hour))
 	if def.Source.Kind == "message_received" {
-		query = countMessageRuns(query)
+		query = countMessageRuns(query, def)
 	}
 	count, err := query.Count(ctx)
 	return count >= def.Source.DailyLimit, err
 }
 
-func (s *Service) admitSourceEvent(ctx context.Context, tx bun.Tx, record workflowRecord, def Definition, item SourceItem, now time.Time) (bool, error) {
+func (s *Service) admitSourceEvent(ctx context.Context, tx bun.Tx, record workflowRecord, def Definition, authority workspaceaccess.StoredAuthority, item SourceItem, now time.Time) (bool, error) {
 	key, err := sourceEventKey(def.Source.Kind, item.ID)
 	if err != nil {
 		return false, err
@@ -321,7 +324,7 @@ func (s *Service) admitSourceEvent(ctx context.Context, tx bun.Tx, record workfl
 		}
 	}
 	if def.Source.Kind == "message_received" {
-		return s.admitMessageEvent(ctx, tx, record, item, now)
+		return s.admitMessageEvent(ctx, tx, record, def, authority, item, now)
 	}
 	return true, nil
 }

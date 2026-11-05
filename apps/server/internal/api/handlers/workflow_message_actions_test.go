@@ -386,6 +386,8 @@ func TestDMOperatorTypingAnEarlierAutomatedPhraseIsAPerson(t *testing.T) {
 	first = h.advance(t, first.ID)
 	require.Equal(t, workflows.StateSucceeded, first.State)
 	require.Len(t, *h.sent, 1)
+	// The echo arrives under the send's own ID, which spends the text match.
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("sent-remote-id", "outbound", "owner", "thanks", base.Add(500*time.Millisecond))))
 	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.2", "inbound", "reader", "guide again", base.Add(time.Second))))
 	h.poll(t)
 	var second workflows.Run

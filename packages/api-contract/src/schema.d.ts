@@ -2721,6 +2721,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/engagement/{id}/automation/opt-out/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove this comment author's opt-out from automatic messages and replies */
+        post: operations["remove-engagement-automation-opt-out"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/engagement/{id}/automation/stop": {
         parameters: {
             query?: never;
@@ -3997,6 +4014,23 @@ export interface paths {
         get: operations["get-message-automation"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/messages/{conversation_id}/automation/opt-out/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove this person's opt-out from automatic messages and replies */
+        post: operations["remove-message-automation-opt-out"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8847,6 +8881,15 @@ export interface components {
              * @example https://example.com/api/v1/schemas/ConversationAutomation.json
              */
             readonly $schema?: string;
+            /** Format: date-time */
+            lapsed_at?: string;
+            /** Format: date-time */
+            lapses_at?: string;
+            /** Format: date-time */
+            opt_out_removed_at?: string;
+            opt_out_removed_by?: string;
+            /** Format: date-time */
+            opted_out_at?: string;
             replies: components["schemas"]["AutomationMessage"][] | null;
             stop_reason?: string;
             /** Format: date-time */
@@ -10327,6 +10370,7 @@ export interface components {
             author_avatar_url: string;
             author_handle: string;
             author_name: string;
+            author_opted_out?: boolean;
             author_remote_id: string;
             automation_run_id?: string;
             automation_state?: string;
@@ -16404,6 +16448,19 @@ export interface components {
             readonly $schema?: string;
             /** @description Whether this request recorded the Workspace's first meaningful composition */
             claimed: boolean;
+        };
+        State: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/api/v1/schemas/State.json
+             */
+            readonly $schema?: string;
+            /** Format: date-time */
+            opt_out_removed_at?: string;
+            opt_out_removed_by?: string;
+            /** Format: date-time */
+            opted_out_at?: string;
         };
         Status: {
             /**
@@ -28469,6 +28526,75 @@ export interface operations {
             };
         };
     };
+    "remove-engagement-automation-opt-out": {
+        parameters: {
+            query: {
+                workspace_id: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["State"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "stop-engagement-automation": {
         parameters: {
             query: {
@@ -33652,6 +33778,75 @@ export interface operations {
         };
     };
     "get-message-automation": {
+        parameters: {
+            query: {
+                workspace_id: string;
+            };
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationAutomation"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "remove-message-automation-opt-out": {
         parameters: {
             query: {
                 workspace_id: string;

@@ -5,7 +5,8 @@
 	import { commentAutomationQueryAPI } from '$lib/query/comment-automation';
 	import { queryClient } from '$lib/query/client';
 	import { workspaceCtx } from '$lib/stores/workspace.svelte';
-	import { takeOverComment } from '$lib/workflows/api';
+	import { removeCommentOptOut, takeOverComment } from '$lib/workflows/api';
+	import AutomationOptOut from '$lib/workflows/automation-opt-out.svelte';
 	import CommentReplyReview from '$lib/workflows/comment-reply-review.svelte';
 	import InlineNotice from './inline-notice.svelte';
 	import { Button } from './ui/button';
@@ -51,12 +52,15 @@
 					? '&post_id=' + encodeURIComponent(item.conversation_remote_id)
 					: '')
 	);
-	async function takeOver() {
+	const takeOver = () => act('stop');
+	const removeOptOut = () => act('remove-opt-out');
+	async function act(action: 'stop' | 'remove-opt-out') {
 		const captured = item;
 		busy = true;
 		error = '';
 		try {
-			await takeOverComment(captured.workspace_id, captured.id);
+			if (action === 'stop') await takeOverComment(captured.workspace_id, captured.id);
+			else await removeCommentOptOut(captured.workspace_id, captured.id);
 			if (item.id === captured.id)
 				await queryClient.invalidateQueries({
 					queryKey: inboxQueryKeys.engagementRoot(captured.workspace_id)
@@ -79,6 +83,12 @@
 					/>{/if}{#each replies.data ?? [] as reply (reply.id)}<CommentReplyReview {reply} />{/each}
 			</Disclosure>{/if}
 		{#if error}<InlineNotice tone="error" message={error} />{/if}
+		<AutomationOptOut
+			optedOut={Boolean(item.author_opted_out)}
+			{canEdit}
+			{busy}
+			onremove={removeOptOut}
+		/>
 		{#if canEdit}<div class="flex flex-wrap gap-2">
 				{#if canAdmin}<Button variant="ghost" size="sm" href={link}
 						>{m.workflows_comment_automate()}</Button

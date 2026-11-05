@@ -53,6 +53,7 @@ checkout can move or be renamed without starting on an empty volume.
 | `apps/docs/content/docs/self-hosting/macbook-macmini.mdx` | Mac mini runbook |
 | `apps/server/internal/services/trackedlinks/` | Tracked redirect links (`/go/:slug`) |
 | `apps/server/internal/database/migrations/9003_message_automation.sql` | Instagram DM automation receipts and takeovers, and `message_history_imports` so history never starts a run |
+| `apps/server/internal/services/automationoptout/` | Opt-out record shared by comments and direct messages, and its removal |
 | `apps/server/internal/services/messaging/automation*.go` | Instagram DM automation: claim, dispatch checks, opt-out, takeover |
 | `apps/server/internal/services/workflows/message_sources.go` | `message_received` source and `message_reply` validation |
 | `apps/server/internal/api/handlers/message_automation.go`, `workflow_message_actions.go` | DM automation routes and workflow effects |
