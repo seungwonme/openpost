@@ -104,7 +104,7 @@ func (s *Service) persistHistoryPage(ctx context.Context, account models.SocialA
 		}
 		// History is not a new incoming event: retain its position and unread state.
 		for _, remote := range page.Messages {
-			if _, err := s.storeProviderMessage(txCtx, tx, account, c.ID, c.CounterpartRemoteID, remote, s.now()); err != nil {
+			if err := s.storeHistoryMessage(txCtx, tx, account, c, remote); err != nil {
 				return err
 			}
 		}

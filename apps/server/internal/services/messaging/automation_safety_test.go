@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/openpost/backend/internal/platform"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
 )
 
 func inboundEvent(id, body string, at time.Time) platform.FetchMessageEventsResult {
@@ -215,6 +217,7 @@ func TestOwnershipPrefersTheProviderMessageID(t *testing.T) {
 func TestMessageOptOutMatching(t *testing.T) {
 	optOuts := []string{
 		"STOP", "stop", "Stop!", "stop.", "unsubscribe", "stop replying", "STOP ❤️", "stop 🙏", "❤️ stop", "ＳＴＯＰ",
+		"cancel", "don't message me", "stop texting", "거부", "차단", "알림 꺼주세요", "그만 좀", "그만 보내줘", "수신 거부할게요", " Stop. ",
 		"stop please", "please stop", "stop it", "stop now please", "stop messaging me", "stop texting me", "stop sending me messages", "opt out", "optout", "opt me out", "unsub", "unsubscribe me", "do not message me", "don't message me", "remove me", "leave me alone",
 		"그만", "그만!", "그만 해", "그만해", "그만 해요", "그만해요", "그만요", "그만 해주세요", "그만해주세요", "그만해줘", "그만보내", "그만 보내", "그만 보내요", "그만 보내세요", "그만 보내주세요", "이제 그만", "제발 그만해 🙏",
 		"보내지 마세요", "보내지마", "보내지 마", "보내지 말아주세요", "연락하지 마세요",
@@ -224,7 +227,7 @@ func TestMessageOptOutMatching(t *testing.T) {
 		assert.True(t, messageRequestsOptOut(body), "%q should opt out", body)
 	}
 	people := []string{
-		"", "   ", "❤️", "stop by the shop", "don't stop", "can't stop", "non stop", "stop sign", "stop the music", "bus stop", "when do you stop serving lunch", "guide please", "hello",
+		"", "   ", "❤️", "stop by the shop", "don't stop", "can't stop", "non stop", "stop sign", "stop the music", "cancel my order", "거부권이 뭔가요", "차단기 가격", "bus stop", "when do you stop serving lunch", "guide please", "hello",
 		"그만큼 좋아요", "그만두셨나요", "그만한 가격이면 살게요", "가이드 보내주세요", "구독 어떻게 하나요", "안녕하세요", "버스탑승 안내",
 		"제 친구가 수신거부를 어떻게 하는지 물어봐서요 혹시 아시나요", "어제 받은 메시지가 너무 좋아서 이제 그만 고민하고 바로 결제하려고 합니다",
 	}
@@ -334,4 +337,99 @@ func TestAutomatedSendStillRequiresActiveMembership(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, f.runSendJob(t, reply.MessageID))
 	assert.Zero(t, *f.sends)
+}
+
+func TestOperatorReplyInTheAppBeforeATriggerStopsIt(t *testing.T) {
+	f := newAutomationFixture(t)
+	require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.human", "I'm a person, let me help", f.now.Add(-time.Minute))))
+	reply, err := f.s.AdvanceAutomationReply(t.Context(), f.request)
+	require.NoError(t, err)
+	require.NotEqual(t, AutomationSending, reply.State)
+	require.NotEmpty(t, reply.Reason)
+	require.Zero(t, *f.sends)
+	require.True(t, f.takenOver(t))
+}
+
+func TestOptOutFirstSeenInHistoryStopsTheNextReply(t *testing.T) {
+	f := newAutomationFixture(t)
+	at := f.now.Add(time.Minute)
+	stop := platform.ProviderMessage{ID: "mid.stop", Direction: "inbound", AuthorRemoteID: "reader", Body: "STOP", RemoteCreatedAt: at}
+	var conversation models.Conversation
+	require.NoError(t, f.db.NewSelect().Model(&conversation).Where("id = 'conversation'").Scan(t.Context()))
+	require.NoError(t, f.s.persistHistoryPage(t.Context(), f.account, conversation, platform.FetchMessageHistoryResult{Messages: []platform.ProviderMessage{stop}}))
+	require.True(t, f.optedOut(t))
+	_, err := f.s.persistConversations(t.Context(), f.account, []platform.ProviderConversation{{ID: conversation.RemoteConversationID, CounterpartRemoteID: "reader", Messages: []platform.ProviderMessage{stop}}})
+	require.NoError(t, err)
+	*f.now = at.Add(time.Minute)
+	reply, err := f.s.AdvanceAutomationReply(t.Context(), f.request)
+	require.NoError(t, err)
+	require.NotEqual(t, AutomationSending, reply.State)
+	require.Zero(t, *f.sends)
+}
+
+func TestBlankMessageRepairedToStopOptsOut(t *testing.T) {
+	f := newAutomationFixture(t)
+	at := f.now.Add(time.Minute)
+	blank := platform.ProviderMessage{ID: "mid.blank", Direction: "inbound", AuthorRemoteID: "reader", RemoteCreatedAt: at}
+	full := blank
+	full.Body = "STOP"
+	var conversation models.Conversation
+	require.NoError(t, f.db.NewSelect().Model(&conversation).Where("id = 'conversation'").Scan(t.Context()))
+	for _, message := range []platform.ProviderMessage{blank, full} {
+		_, err := f.s.persistConversations(t.Context(), f.account, []platform.ProviderConversation{{ID: conversation.RemoteConversationID, CounterpartRemoteID: "reader", Messages: []platform.ProviderMessage{message}}})
+		require.NoError(t, err)
+	}
+	var body string
+	require.NoError(t, f.db.NewSelect().Table("direct_messages").Column("body").Where("remote_message_id = 'mid.blank'").Scan(t.Context(), &body))
+	require.Equal(t, "STOP", body)
+	require.True(t, f.optedOut(t))
+}
+
+func TestCrashAfterAcceptanceThenOptOutStaysSent(t *testing.T) {
+	f := newAutomationFixture(t)
+	reply, err := f.s.AdvanceAutomationReply(t.Context(), f.request)
+	require.NoError(t, err)
+	require.NoError(t, f.runSendJob(t, reply.MessageID))
+	require.Equal(t, 1, *f.sends)
+	_, err = f.db.NewRaw(`UPDATE direct_messages SET send_status = 'queued' WHERE id = ?`, reply.MessageID).Exec(t.Context())
+	require.NoError(t, err)
+	_, err = f.db.NewRaw(`UPDATE message_automation_replies SET state = 'sending' WHERE message_id = ?`, reply.MessageID).Exec(t.Context())
+	require.NoError(t, err)
+	f.optOut(t)
+	require.NoError(t, f.runSendJob(t, reply.MessageID))
+	require.Equal(t, 1, *f.sends, "the accepted write is not repeated")
+	require.Equal(t, "sent", f.message(t, reply.MessageID).SendStatus)
+	require.Equal(t, AutomationSent, f.stored(t, reply.MessageID).State)
+}
+
+func TestTakeoverAsksWorkflowsToStopARunWithNoReceipt(t *testing.T) {
+	f := newAutomationFixture(t)
+	var stopped []string
+	f.s.SetAutomationRunStopper(func(_ context.Context, _ bun.Tx, _, conversationID string, ids []string, _ string) error {
+		assert.Empty(t, ids)
+		stopped = append(stopped, conversationID)
+		return nil
+	})
+	require.NoError(t, f.s.StopConversationAutomation(t.Context(), f.actor, "workspace", "conversation"))
+	require.Equal(t, []string{"conversation"}, stopped)
+}
+
+func TestOnlyMessagesFirstStoredFromHistoryAreMarked(t *testing.T) {
+	f := newAutomationFixture(t)
+	var conversation models.Conversation
+	require.NoError(t, f.db.NewSelect().Model(&conversation).Where("id = 'conversation'").Scan(t.Context()))
+	imported := func() []string {
+		ids := []string{}
+		require.NoError(t, f.db.NewSelect().TableExpr("message_history_imports AS h").Join("JOIN direct_messages AS d ON d.id = h.message_id").ColumnExpr("d.remote_message_id").Order("d.remote_message_id").Scan(t.Context(), &ids))
+		return ids
+	}
+	inbound := func(id string) platform.ProviderMessage {
+		return platform.ProviderMessage{ID: id, Direction: "inbound", AuthorRemoteID: "reader", Body: "guide", RemoteCreatedAt: *f.now}
+	}
+	require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", inboundEvent("mid.live", "guide", *f.now)))
+	page := platform.FetchMessageHistoryResult{Messages: []platform.ProviderMessage{inbound("mid.live"), inbound("mid.history")}}
+	require.NoError(t, f.s.persistHistoryPage(t.Context(), f.account, conversation, page))
+	require.Equal(t, []string{"mid.history"}, imported(), "a message polling stored first stays eligible")
+	require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", inboundEvent("mid.history", "guide", *f.now)))
+	require.Equal(t, []string{"mid.history"}, imported(), "a later delivery does not make history new")
 }

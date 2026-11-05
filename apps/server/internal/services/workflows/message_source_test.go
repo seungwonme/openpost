@@ -386,3 +386,18 @@ func TestTakenOverConversationStartsNoRunEvenAfterResume(t *testing.T) {
 	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
 	assert.Equal(t, []string{"after"}, f.runSources(t, workflow.ID))
 }
+
+func TestMessageFirstStoredFromHistoryNeverStartsARun(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newMessageSourceFixture(t, backend)
+			workflow := f.publish(t, messageSource("GUIDE"), nil)
+			f.message(t, models.DirectMessage{ID: "imported", AuthorRemoteID: "reader", Body: "guide"})
+			_, err := f.s.db.NewRaw(`INSERT INTO message_history_imports(message_id) VALUES('imported')`).Exec(t.Context())
+			require.NoError(t, err)
+			f.message(t, models.DirectMessage{ID: "live", AuthorRemoteID: "reader", Body: "guide"})
+			require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+			assert.Equal(t, []string{"live"}, f.runSources(t, workflow.ID))
+		})
+	}
+}

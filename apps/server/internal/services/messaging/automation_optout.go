@@ -26,8 +26,8 @@ var (
 	englishFillers       = map[string]bool{"please": true, "pls": true, "plz": true, "now": true, "thanks": true, "thank": true, "you": true, "thx": true, "just": true, "ok": true, "okay": true, "it": true, "sir": true, "kindly": true, "already": true, "immediately": true, "right": true}
 	stopObjects          = map[string]bool{"replying": true, "reply": true, "messaging": true, "message": true, "messages": true, "msg": true, "msgs": true, "texting": true, "text": true, "sending": true, "send": true, "contacting": true, "contact": true, "dm": true, "dms": true, "dming": true, "spam": true, "spamming": true, "me": true, "to": true, "us": true, "these": true, "them": true, "all": true, "this": true}
 
-	koreanOptOutPhrases = []string{"수신거부", "수신거절", "수신취소", "구독취소", "구독해지", "구독해제", "보내지마", "보내지말", "연락하지마", "연락하지말"}
-	koreanStopWords     = map[string]bool{"스탑": true, "스톱": true, "스탑요": true, "스톱요": true}
+	koreanOptOutPhrases = []string{"수신거부", "수신거절", "수신취소", "구독취소", "구독해지", "구독해제", "보내지마", "보내지말", "연락하지마", "연락하지말", "알림꺼", "알림끄"}
+	koreanStopWords     = map[string]bool{"스탑": true, "스톱": true, "스탑요": true, "스톱요": true, "거부": true, "거부요": true, "거부합니다": true, "차단": true, "차단요": true, "차단합니다": true}
 	// "그만" also begins words that have nothing to do with stopping.
 	koreanStopFalseFriends = []string{"그만큼", "그만한", "그만두", "그만둔", "그만뒀", "그만치"}
 )
@@ -63,7 +63,7 @@ func englishRequestsOptOut(words []string) bool {
 			rest = append(rest, word)
 		}
 	}
-	if len(rest) == 0 || rest[0] != "stop" {
+	if len(rest) == 0 || (rest[0] != "stop" && rest[0] != "cancel") {
 		return false
 	}
 	for _, word := range rest[1:] {

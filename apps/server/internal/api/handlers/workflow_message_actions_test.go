@@ -203,8 +203,10 @@ func TestDMTakeoverCancelsTheRunWithItsReason(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, workflows.StateCancelled, run.State)
 	assert.Contains(t, run.Error, "took over")
-	_, err = h.service.Approve(t.Context(), h.actor, "ws", run.ID, run.Revision, 0, "Too late")
-	require.ErrorIs(t, err, workflows.ErrState)
+	late, err := h.service.Approve(t.Context(), h.actor, "ws", run.ID, run.Revision, 0, "Too late")
+	require.NoError(t, err, "approving finds the outcome, not a conflict")
+	assert.Equal(t, workflows.StateCancelled, late.State)
+	assert.Contains(t, late.Error, "took over")
 	assert.Empty(t, *h.sent)
 }
 
@@ -322,4 +324,88 @@ func TestDMApprovalDuringAHumanReplyReturnsTheOutcome(t *testing.T) {
 	assert.Equal(t, workflows.StateCancelled, stopped.State)
 	assert.NotEmpty(t, stopped.Error)
 	assert.Empty(t, *h.sent)
+}
+
+func TestDMApprovalAfterAnEchoTookOverReturnsTheOutcome(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmReplyStep("review")})
+	base := time.Now().UTC().Add(time.Second)
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.1", "inbound", "reader", "guide", base)))
+	h.poll(t)
+	run := h.advance(t, h.runs(t)[0].ID)
+	require.Equal(t, workflows.StateApproval, run.State)
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.h", "outbound", "owner", "typed in the app", base.Add(time.Second))))
+	stopped, err := h.service.Approve(t.Context(), h.actor, "ws", run.ID, run.Revision, 0, "answer")
+	require.NoError(t, err)
+	require.Equal(t, workflows.StateCancelled, stopped.State)
+	require.NotEmpty(t, stopped.Error)
+	require.Empty(t, *h.sent)
+}
+
+func TestDMQueuedRunStaysStoppedAfterTakeoverAndResume(t *testing.T) {
+	wait := workflows.Step{ID: "wait", Kind: workflows.KindWait, Name: "Wait", Inputs: map[string]workflows.Value{"minutes": {Literal: 0}}}
+	h := newDMHarness(t, []workflows.Step{wait, dmReplyStep("automatic")})
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.1", "inbound", "reader", "guide", time.Now().UTC().Add(time.Second))))
+	h.poll(t)
+	run := h.runs(t)[0]
+	conversation := h.igConversation(t)
+	require.NoError(t, h.inbox.StopConversationAutomation(t.Context(), h.actor, "ws", conversation))
+	stopped, err := h.service.GetRun(t.Context(), h.actor, "ws", run.ID)
+	require.NoError(t, err)
+	require.Equal(t, workflows.StateCancelled, stopped.State)
+	require.NoError(t, h.inbox.ResumeConversationAutomation(t.Context(), h.actor, "ws", conversation))
+	after := h.advance(t, run.ID)
+	after = h.advance(t, after.ID)
+	h.sendQueued(t)
+	require.Equal(t, workflows.StateCancelled, after.State)
+	require.Empty(t, *h.sent)
+}
+
+func TestDMOperatorReplyBeforeTheNextMessageStartsNothing(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmReplyStep("automatic")})
+	base := time.Now().UTC().Add(time.Second)
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.0", "inbound", "reader", "hello", base)))
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.h", "outbound", "owner", "operator here, in the Instagram app", base.Add(time.Second))))
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.1", "inbound", "reader", "guide", base.Add(2*time.Second))))
+	h.poll(t)
+	require.Empty(t, h.runs(t))
+	require.Empty(t, *h.sent)
+	stops, err := h.db.NewSelect().Table("message_automation_stops").Count(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, 1, stops)
+}
+
+func TestDMOperatorTypingAnEarlierAutomatedPhraseIsAPerson(t *testing.T) {
+	wait := workflows.Step{ID: "wait", Kind: workflows.KindWait, Name: "Wait", Inputs: map[string]workflows.Value{"minutes": {Literal: 0}}}
+	h := newDMHarness(t, []workflows.Step{wait, {ID: "reply", Kind: workflows.KindMessageReply, Name: "Reply", Inputs: map[string]workflows.Value{"message_id": {Reference: "source.message_id"}, "text": {Literal: "thanks"}, "delivery": {Literal: "automatic"}}}})
+	base := time.Now().UTC().Add(time.Second)
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.1", "inbound", "reader", "guide", base)))
+	h.poll(t)
+	first := h.advance(t, h.runs(t)[0].ID)
+	first = h.advance(t, first.ID)
+	h.sendQueued(t)
+	first = h.advance(t, first.ID)
+	require.Equal(t, workflows.StateSucceeded, first.State)
+	require.Len(t, *h.sent, 1)
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.2", "inbound", "reader", "guide again", base.Add(time.Second))))
+	h.poll(t)
+	var second workflows.Run
+	for _, candidate := range h.runs(t) {
+		if candidate.ID != first.ID {
+			second = candidate
+		}
+	}
+	require.NotEmpty(t, second.ID)
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.h", "outbound", "owner", "thanks", base.Add(2*time.Second))))
+	after := h.advance(t, second.ID)
+	after = h.advance(t, after.ID)
+	h.sendQueued(t)
+	require.Equal(t, workflows.StateCancelled, after.State)
+	require.Len(t, *h.sent, 1)
+}
+
+func (h *dmHarness) igConversation(t *testing.T) string {
+	t.Helper()
+	var id string
+	require.NoError(t, h.db.NewSelect().Model((*models.Conversation)(nil)).Column("id").Where("social_account_id = 'ig'").Scan(t.Context(), &id))
+	return id
 }

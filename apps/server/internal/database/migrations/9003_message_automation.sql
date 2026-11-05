@@ -45,3 +45,9 @@ CREATE TABLE IF NOT EXISTS message_automation_stops (
 
 CREATE INDEX IF NOT EXISTS direct_messages_automation_source_idx
   ON direct_messages (workspace_id, direction, created_at, id);
+
+-- A message first stored from a history page is not a new event, whatever its
+-- timestamps say, so it never starts a workflow.
+CREATE TABLE IF NOT EXISTS message_history_imports (
+  message_id TEXT PRIMARY KEY REFERENCES direct_messages(id) ON DELETE CASCADE
+);
