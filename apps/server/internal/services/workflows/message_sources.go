@@ -19,6 +19,9 @@ import (
 // delay can never reach a send, so it is rejected before activation.
 const messageWindowMinutes = 24 * 60
 
+// One person cannot use up a workflow's daily limit for everyone else.
+const maxMessageRunsPerSender = 5
+
 // MessageSourceValidator checks connected-account readiness at activation.
 type MessageSourceValidator interface {
 	ValidateMessageSource(context.Context, workspaceaccess.StoredAuthority, Source) error
@@ -72,11 +75,12 @@ type messageSourceRow struct {
 	CounterpartName   string    `bun:"counterpart_name"`
 	CounterpartHandle string    `bun:"counterpart_handle"`
 	WindowExpiresAt   time.Time `bun:"window_expires_at"`
+	TakenOver         bool      `bun:"taken_over"`
 }
 
 func messageSourceQuery(db bun.IDB, workspaceID string) *bun.SelectQuery {
 	return db.NewSelect().TableExpr("direct_messages AS d").
-		ColumnExpr("d.id, d.conversation_id, c.social_account_id, d.body, d.remote_created_at, d.created_at, c.counterpart_name, c.counterpart_handle, c.messaging_window_expires_at AS window_expires_at").
+		ColumnExpr("d.id, d.conversation_id, c.social_account_id, d.body, d.remote_created_at, d.created_at, c.counterpart_name, c.counterpart_handle, c.messaging_window_expires_at AS window_expires_at, EXISTS (SELECT 1 FROM message_automation_stops s WHERE s.conversation_id = d.conversation_id) AS taken_over").
 		Join("JOIN conversations AS c ON c.id = d.conversation_id").
 		Join("JOIN social_accounts AS a ON a.id = c.social_account_id").
 		Where("d.workspace_id = ? AND c.platform = 'instagram' AND d.direction = 'inbound' AND d.deleted_at IS NULL AND d.remote_message_id <> ''", workspaceID).
@@ -108,8 +112,9 @@ func (s *Service) messageItems(ctx context.Context, workspaceID string, source S
 	items := make([]SourceItem, 0, len(rows))
 	for _, row := range rows {
 		// The ledger records excluded messages, so bounded pages keep progressing.
-		// A closed window cannot be answered, so it never spends the daily limit.
-		excluded := !messageSourceMatches(source, row.Body) || !row.WindowExpiresAt.After(now)
+		// A closed window or a taken-over conversation cannot be answered, so neither
+		// spends the daily limit. Recording them means Resume applies only to later messages.
+		excluded := !messageSourceMatches(source, row.Body) || !row.WindowExpiresAt.After(now) || row.TakenOver
 		if excluded && record == nil {
 			continue
 		}
@@ -149,6 +154,9 @@ func (s *Service) messageWorkflowWins(ctx context.Context, db bun.IDB, current w
 			return false, nil
 		}
 		return false, err
+	}
+	if row.TakenOver {
+		return false, nil
 	}
 	var candidates []workflowRecord
 	if err := db.NewSelect().Model(&candidates).Where("workspace_id = ? AND enabled = ?", current.WorkspaceID, true).Order("created_at ASC", "id ASC").Limit(maxWorkflows).Scan(ctx); err != nil {
@@ -304,11 +312,21 @@ func (s *Service) validateMessageAutomationAccess(ctx context.Context, authority
 }
 
 // CancelMessageAutomationRuns is the workflow half of a conversation takeover or
-// opt-out. The messaging owner supplies only runs holding receipts in that
-// conversation. The reason stays on the run for inspection.
-func (s *Service) CancelMessageAutomationRuns(ctx context.Context, tx bun.Tx, workspaceID string, ids []string, reason string) error {
+// opt-out. It stops every run for that conversation, including one in a wait step
+// with no receipt yet, so nothing sends after a later resume. The reason stays on
+// the run for inspection.
+func (s *Service) CancelMessageAutomationRuns(ctx context.Context, tx bun.Tx, workspaceID, conversationID string, ids []string, reason string) error {
 	var runs []runRecord
-	if err := tx.NewSelect().Model(&runs).Where("workspace_id = ? AND id IN (?) AND state IN (?)", workspaceID, bun.List(ids), bun.List([]string{StateQueued, StateRunning, StateWaiting, StateApproval})).Scan(ctx); err != nil {
+	query := tx.NewSelect().Model(&runs).Where("workspace_id = ? AND state IN (?)", workspaceID, bun.List([]string{StateQueued, StateRunning, StateWaiting, StateApproval})).
+		WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
+			q = q.Where("source_json LIKE ?", conversationSourcePattern(conversationID))
+			if len(ids) > 0 {
+				q = q.WhereOr("id IN (?)", bun.List(ids))
+			}
+			// A comment campaign waiting for this person has no source conversation yet.
+			return q.WhereOr("id IN (SELECT w.run_id FROM message_sequence_waits w JOIN conversations c ON c.social_account_id = w.account_id AND c.counterpart_remote_id = w.author_remote_id WHERE c.id = ?)", conversationID)
+		})
+	if err := query.Scan(ctx); err != nil {
 		return err
 	}
 	for _, run := range runs {
@@ -325,6 +343,31 @@ func (s *Service) CancelMessageAutomationRuns(ctx context.Context, tx bun.Tx, wo
 	return nil
 }
 
+func conversationSourcePattern(conversationID string) string {
+	return `%"conversation_id":"` + conversationID + `"%`
+}
+
+// countMessageRuns leaves out runs that sent nothing, so a stopped or skipped
+// message does not spend a workflow's daily limit.
+func countMessageRuns(query *bun.SelectQuery) *bun.SelectQuery {
+	return query.Where("state NOT IN (?)", bun.List([]string{StateFailed, StateCancelled})).Where(`results_json NOT LIKE '%"status":"skipped"%'`)
+}
+
+func messageSenderLimitReached(ctx context.Context, db bun.IDB, record workflowRecord, conversationID string, now time.Time) (bool, error) {
+	query := db.NewSelect().Model((*runRecord)(nil)).Where("workflow_id = ? AND mode = ? AND created_at >= ?", record.ID, ModeLive, now.Truncate(24*time.Hour)).Where("source_json LIKE ?", conversationSourcePattern(conversationID))
+	count, err := countMessageRuns(query).Count(ctx)
+	return count >= maxMessageRunsPerSender, err
+}
+
+func (s *Service) admitMessageEvent(ctx context.Context, tx bun.Tx, record workflowRecord, item SourceItem, now time.Time) (bool, error) {
+	wins, err := s.messageWorkflowWins(ctx, tx, record, item.ID)
+	if err != nil || !wins {
+		return false, err
+	}
+	limited, err := messageSenderLimitReached(ctx, tx, record, item.ConversationID, now)
+	return !limited, err
+}
+
 // A reviewed message that can no longer be sent ends its run with that reason,
 // so the reviewer sees why their approval did not produce a message.
 func (s *Service) failReviewedMessageRun(ctx context.Context, actor workspaceaccess.ActorFacts, record runRecord, reason string) (Run, error) {
@@ -337,7 +380,16 @@ func (s *Service) failReviewedMessageRun(ctx context.Context, actor workspaceacc
 			return err
 		}
 		if n, _ := updated.RowsAffected(); n != 1 {
-			return ErrState
+			// A person's reply detected during this approval already cancelled the
+			// run with its reason. That is the outcome, not a conflict.
+			var state string
+			if err := tx.NewSelect().Model((*runRecord)(nil)).Column("state").Where("id = ?", record.ID).Scan(ctx, &state); err != nil {
+				return err
+			}
+			if state != StateCancelled {
+				return ErrState
+			}
+			return nil
 		}
 		record.Revision++
 		return s.enqueueApprovalNotice(ctx, tx, record, record.CurrentStepID, "resolved")

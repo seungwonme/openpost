@@ -26,10 +26,13 @@ const (
 
 	// A follow-up is allowed only within this long of the person's response.
 	sequenceResponseWindow = 24 * time.Hour
-	sequenceResponsePoll   = 5 * time.Minute
 
 	stopReasonComment    = "A person took over the comment that started this sequence."
 	stopReasonNoResponse = "The person did not respond to the private reply in time, so no follow-up was sent."
+
+	// StopReasonSequenceActive is an ordinary outcome: the person is already in a
+	// sequence, and a second one would interleave with it.
+	StopReasonSequenceActive = "Another automated sequence is running in this conversation, so this message did not start one."
 )
 
 // SequenceMessage is one authored follow-up. Its delay counts from the person's
@@ -81,7 +84,13 @@ func (s *Service) AdvanceMessageSequence(ctx context.Context, in SequenceRequest
 		}
 		var err error
 		progress, err = s.advanceSequence(ctx, tx, in)
+		if err != nil {
+			return err
+		}
 		progress.Total = len(in.Messages)
+		if in.Comment != nil && progress.State != SequenceWaitingResponse {
+			_, err = tx.NewRaw(`DELETE FROM message_sequence_waits WHERE run_id = ?`, in.RunID).Exec(ctx)
+		}
 		return err
 	})
 	return progress, err
@@ -159,7 +168,7 @@ func (s *Service) stopForEarlierHumanReply(ctx context.Context, tx bun.Tx, conve
 	if err := tx.NewSelect().Model(&account).Where("id = ?", conversation.SocialAccountID).Scan(ctx); err != nil {
 		return SequenceProgress{}, err
 	}
-	human, err := humanRepliedAfter(ctx, tx, conversation, account, after)
+	human, err := s.humanRepliedAfter(ctx, tx, conversation, account, after)
 	if err != nil || !human {
 		return SequenceProgress{}, err
 	}
@@ -195,7 +204,6 @@ func (s *Service) findSequenceResponse(ctx context.Context, tx bun.Tx, in Sequen
 		Where("direct_message.workspace_id = ? AND direct_message.direction = 'inbound' AND direct_message.deleted_at IS NULL", in.Authority.WorkspaceID).
 		Where("c.social_account_id = ? AND c.counterpart_remote_id = ? AND c.platform = 'instagram'", anchor.AccountID, anchor.AuthorRemoteID).
 		Where("direct_message.remote_created_at > ? AND direct_message.remote_created_at <= ?", anchor.RepliedAt, anchor.RespondBy).
-		Where("NOT EXISTS (SELECT 1 FROM message_automation_replies a WHERE a.trigger_message_id = direct_message.id AND a.sequence_position = 0)").
 		Order("direct_message.remote_created_at ASC", "direct_message.id ASC").Limit(1).Scan(ctx)
 	if err == nil {
 		return SequenceProgress{}, response, nil
@@ -203,15 +211,13 @@ func (s *Service) findSequenceResponse(ctx context.Context, tx bun.Tx, in Sequen
 	if !errors.Is(err, sql.ErrNoRows) {
 		return SequenceProgress{}, response, err
 	}
-	now := s.now()
-	if !now.Before(anchor.RespondBy) {
+	if !s.now().Before(anchor.RespondBy) {
 		return SequenceProgress{State: SequenceNoResponse, Reason: stopReasonNoResponse}, response, nil
 	}
-	wake := now.Add(sequenceResponsePoll)
-	if wake.After(anchor.RespondBy) {
-		wake = anchor.RespondBy
+	if _, err := tx.NewRaw(`INSERT INTO message_sequence_waits(run_id,workspace_id,item_id,account_id,author_remote_id,replied_at,respond_by) VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, in.RunID, in.Authority.WorkspaceID, anchor.ItemID, anchor.AccountID, anchor.AuthorRemoteID, anchor.RepliedAt, anchor.RespondBy).Exec(ctx); err != nil {
+		return SequenceProgress{}, response, err
 	}
-	return SequenceProgress{State: SequenceWaitingResponse, WakeAt: wake}, response, nil
+	return SequenceProgress{State: SequenceWaitingResponse, WakeAt: anchor.RespondBy}, response, nil
 }
 
 func commentStopReason(ctx context.Context, db bun.IDB, itemID string) (string, error) {
@@ -229,13 +235,6 @@ func commentStopReason(ctx context.Context, db bun.IDB, itemID string) (string, 
 	return "", nil
 }
 
-func automationMessageTime(message models.DirectMessage) time.Time {
-	if message.RemoteCreatedAt.IsZero() {
-		return message.CreatedAt
-	}
-	return message.RemoteCreatedAt
-}
-
 func (s *Service) claimSequenceRow(ctx context.Context, tx bun.Tx, trigger models.DirectMessage, conversation models.Conversation, in SequenceRequest, position int, base time.Time) (AutomationMessage, error) {
 	authored := in.Messages[position]
 	now := s.now()
@@ -249,19 +248,42 @@ func (s *Service) claimSequenceRow(ctx context.Context, tx bun.Tx, trigger model
 	}
 	if issue != "" {
 		reply.State, reply.Reason = AutomationCancelled, issue
-	} else if position == 0 {
-		looping, err := s.automationLooping(ctx, tx, conversation.ID)
+	} else {
+		reason, err := s.sequenceClaimStop(ctx, tx, conversation, in.RunID, position)
 		if err != nil {
 			return reply, err
 		}
-		if looping {
-			reply.State, reply.Reason = AutomationSkipped, stopReasonLoop
+		if reason != "" {
+			reply.State, reply.Reason = AutomationSkipped, reason
 		}
 	}
 	if _, err := tx.NewInsert().Model(&reply).Exec(ctx); err != nil {
 		return reply, err
 	}
 	return reply, inboxchanges.Append(ctx, tx, conversation.WorkspaceID, inboxchanges.Change{Kind: "conversation", ConversationID: conversation.ID})
+}
+
+func (s *Service) sequenceClaimStop(ctx context.Context, db bun.IDB, conversation models.Conversation, runID string, position int) (string, error) {
+	if position == 0 {
+		active, err := s.sequenceActive(ctx, db, conversation.ID, runID)
+		if err != nil {
+			return "", err
+		}
+		if active {
+			return StopReasonSequenceActive, nil
+		}
+	}
+	return s.automationLimitReason(ctx, db, conversation)
+}
+
+// sequenceActive allows one automated sequence per conversation across workflows.
+// A sequence is active while its run is, until its last position settles.
+func (s *Service) sequenceActive(ctx context.Context, db bun.IDB, conversationID, runID string) (bool, error) {
+	return db.NewSelect().TableExpr("message_automation_replies AS a").Join("JOIN workflow_runs AS r ON r.id = a.run_id").
+		Where("a.conversation_id = ? AND a.sequence_length > 0 AND a.run_id <> ?", conversationID, runID).
+		Where("r.state IN ('queued', 'running', 'waiting', 'awaiting_approval')").
+		Where("(a.state IN (?) OR (a.state = ? AND a.sequence_position + 1 < a.sequence_length AND NOT EXISTS (SELECT 1 FROM message_automation_replies n WHERE n.run_id = a.run_id AND n.step_id = a.step_id AND n.sequence_position = a.sequence_position + 1)))", bun.List([]string{AutomationScheduled, AutomationAwaitingReview, AutomationReady, AutomationSending}), AutomationSent).
+		Exists(ctx)
 }
 
 func (s *Service) advanceSequenceRow(ctx context.Context, tx bun.Tx, trigger models.DirectMessage, conversation models.Conversation, in SequenceRequest, reply AutomationMessage) (SequenceProgress, error) {
@@ -280,7 +302,9 @@ func (s *Service) advanceSequenceRow(ctx context.Context, tx bun.Tx, trigger mod
 		progress.WakeAt = reply.NotBefore
 	case AutomationAwaitingReview, AutomationReady, AutomationSending:
 	default:
-		progress.State = SequenceStopped
+		if reply.Reason != StopReasonSequenceActive {
+			progress.State = SequenceStopped
+		}
 	}
 	return progress, nil
 }

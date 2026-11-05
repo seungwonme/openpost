@@ -236,7 +236,7 @@
 								· {m.workflows_usage_cost({ amount: usage.data.cost_usd.toFixed(6) })}{/if}
 						</p>{/if}
 					{#if step.error}<p class="mt-3 text-sm text-destructive">{step.error}</p>{/if}
-					{#if step.kind === 'message_sequence' && step.output?.reason && !step.error}<p
+					{#if (step.kind === 'message_sequence' || step.kind === 'message_reply') && step.output?.reason && !step.error}<p
 							class="mt-3 text-sm text-muted-foreground"
 						>
 							{step.output.reason}

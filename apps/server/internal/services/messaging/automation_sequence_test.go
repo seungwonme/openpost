@@ -49,13 +49,6 @@ func (f automationFixture) commentSequenceRequest(t *testing.T) SequenceRequest 
 	return in
 }
 
-func (f automationFixture) receive(t *testing.T, id string, at time.Time) {
-	t.Helper()
-	message := models.DirectMessage{ID: id, WorkspaceID: "workspace", ConversationID: "conversation", RemoteMessageID: "mid." + id, Direction: "inbound", AuthorRemoteID: "reader", Body: "yes please", AttachmentsJSON: "[]", SendStatus: "received", RemoteCreatedAt: at, CreatedAt: at, UpdatedAt: at}
-	_, err := f.db.NewInsert().Model(&message).Exec(t.Context())
-	require.NoError(t, err)
-}
-
 func (f automationFixture) replyRows(t *testing.T) []AutomationMessage {
 	t.Helper()
 	var rows []AutomationMessage
@@ -226,25 +219,107 @@ func TestSequenceClaimsTheTriggerAgainstOtherOwners(t *testing.T) {
 	assert.Len(t, f.replyRows(t), 1)
 }
 
-func TestSequenceFollowUpsDoNotCountTowardTheLoopGuard(t *testing.T) {
-	f := newAutomationFixture(t)
-	in := f.sequenceRequest()
-	in.Messages = []SequenceMessage{{Text: "1"}, {Text: "2"}, {Text: "3"}, {Text: "4"}, {Text: "5"}}
-	for range in.Messages {
-		progress := f.advanceSequence(t, in)
-		if progress.State != AutomationSending {
-			progress = f.advanceSequence(t, in)
+func TestSequenceMessagesAllCountTowardTheHourlyLimit(t *testing.T) {
+	t.Run("one full sequence fits", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		in := f.sequenceRequest()
+		in.Messages = []SequenceMessage{{Text: "1"}, {Text: "2"}, {Text: "3"}, {Text: "4"}, {Text: "5"}}
+		for range in.Messages {
+			progress := f.advanceSequence(t, in)
+			require.Equal(t, AutomationSending, progress.State)
+			require.NoError(t, f.runSendJob(t, progress.Reply.MessageID))
 		}
-		require.Equal(t, AutomationSending, progress.State)
-		require.NoError(t, f.runSendJob(t, progress.Reply.MessageID))
-	}
-	assert.Equal(t, 5, *f.sends)
-	count, err := f.db.NewSelect().Model((*AutomationMessage)(nil)).Where("conversation_id = 'conversation' AND sequence_position = 0").Count(t.Context())
-	require.NoError(t, err)
-	assert.Equal(t, 1, count)
-	looping, err := f.s.automationLooping(t.Context(), f.db, "conversation")
-	require.NoError(t, err)
-	assert.False(t, looping)
+		assert.Equal(t, 5, *f.sends)
+		assert.Equal(t, SequenceComplete, f.advanceSequence(t, in).State)
+	})
+	t.Run("an earlier reply leaves room for fewer", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		earlier, err := f.s.AdvanceAutomationReply(t.Context(), f.request)
+		require.NoError(t, err)
+		require.NoError(t, f.runSendJob(t, earlier.MessageID))
+		f.receive(t, "second", *f.now)
+		f.seedRun(t, "second-run", "workflow")
+		in := f.sequenceRequest()
+		in.RunID, in.TriggerMessageID = "second-run", "second"
+		in.Messages = []SequenceMessage{{Text: "1"}, {Text: "2"}, {Text: "3"}, {Text: "4"}, {Text: "5"}}
+		var last SequenceProgress
+		for range in.Messages {
+			last = f.advanceSequence(t, in)
+			if last.State != AutomationSending {
+				break
+			}
+			require.NoError(t, f.runSendJob(t, last.Reply.MessageID))
+		}
+		assert.Equal(t, SequenceStopped, last.State)
+		assert.Equal(t, stopReasonLoop, last.Reason)
+		assert.Equal(t, 5, *f.sends, "one reply and four follow-ups fill the hour")
+	})
+}
+
+func TestOneSequencePerConversation(t *testing.T) {
+	t.Run("a later trigger records an outcome and sends nothing", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		in := f.sequenceRequest()
+		f.deliverFirst(t, in)
+		f.receive(t, "later", *f.now)
+		f.seedRun(t, "second-run", "second-workflow")
+		second := f.sequenceRequest()
+		second.RunID, second.WorkflowID, second.TriggerMessageID = "second-run", "second-workflow", "later"
+		skipped := f.advanceSequence(t, second)
+		assert.Equal(t, AutomationSkipped, skipped.State)
+		assert.Equal(t, StopReasonSequenceActive, skipped.Reason)
+		assert.NotEmpty(t, skipped.Reply.ID, "the receipt shows why this message was not answered")
+		assert.Equal(t, 1, *f.sends)
+	})
+	t.Run("a plain reply waits its turn too", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		f.deliverFirst(t, f.sequenceRequest())
+		f.receive(t, "later", *f.now)
+		f.seedRun(t, "reply-run", "workflow")
+		reply := f.request
+		reply.RunID, reply.TriggerMessageID = "reply-run", "later"
+		stored, err := f.s.AdvanceAutomationReply(t.Context(), reply)
+		require.NoError(t, err)
+		assert.Equal(t, StopReasonSequenceActive, stored.Reason)
+		assert.Equal(t, 1, *f.sends)
+	})
+	t.Run("a finished sequence makes room", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		in := f.sequenceRequest()
+		in.Messages = in.Messages[:1]
+		first := f.advanceSequence(t, in)
+		require.NoError(t, f.runSendJob(t, first.Reply.MessageID))
+		require.Equal(t, SequenceComplete, f.advanceSequence(t, in).State)
+		f.receive(t, "later", *f.now)
+		f.seedRun(t, "second-run", "workflow")
+		second := f.sequenceRequest()
+		second.RunID, second.TriggerMessageID = "second-run", "later"
+		assert.Equal(t, AutomationSending, f.advanceSequence(t, second).State)
+	})
+	t.Run("a stopped run makes room", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		f.deliverFirst(t, f.sequenceRequest())
+		f.setRunState(t, "failed")
+		f.receive(t, "later", *f.now)
+		f.seedRun(t, "second-run", "workflow")
+		second := f.sequenceRequest()
+		second.RunID, second.TriggerMessageID = "second-run", "later"
+		assert.Equal(t, AutomationSending, f.advanceSequence(t, second).State)
+	})
+	t.Run("two comment campaigns cannot both claim one DM", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		in := f.commentSequenceRequest(t)
+		f.receive(t, "response", f.now.Add(-time.Minute))
+		first := f.advanceSequence(t, in)
+		require.Equal(t, AutomationSending, first.State)
+		f.seedRun(t, "second-run", "second-workflow")
+		second := in
+		second.RunID, second.WorkflowID = "second-run", "second-workflow"
+		skipped := f.advanceSequence(t, second)
+		assert.Equal(t, AutomationSkipped, skipped.State)
+		assert.Equal(t, stopReasonOwned, skipped.Reason)
+		assert.Len(t, f.replyRows(t), 1)
+	})
 }
 
 func TestCommentFollowUpWaitsForAQualifyingResponse(t *testing.T) {
@@ -253,9 +328,12 @@ func TestCommentFollowUpWaitsForAQualifyingResponse(t *testing.T) {
 		in := f.commentSequenceRequest(t)
 		waiting := f.advanceSequence(t, in)
 		assert.Equal(t, SequenceWaitingResponse, waiting.State)
-		assert.Equal(t, f.now.Add(sequenceResponsePoll), waiting.WakeAt)
+		assert.Equal(t, in.Comment.RespondBy, waiting.WakeAt, "a batched check wakes the run sooner when something happens")
 		assert.Empty(t, f.replyRows(t))
 		assert.Zero(t, *f.sends)
+		parked, err := f.db.NewSelect().Table("message_sequence_waits").Where("run_id = 'run'").Count(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, 1, parked)
 	})
 	t.Run("a message from before the private reply does not qualify", func(t *testing.T) {
 		f := newAutomationFixture(t)
@@ -279,13 +357,15 @@ func TestCommentFollowUpWaitsForAQualifyingResponse(t *testing.T) {
 		f.receive(t, "other", in.Comment.RepliedAt.Add(time.Minute))
 		assert.Equal(t, SequenceWaitingResponse, f.advanceSequence(t, in).State)
 	})
-	t.Run("a response another automation answered does not qualify", func(t *testing.T) {
+	t.Run("a response another automation answered ends the wait", func(t *testing.T) {
 		f := newAutomationFixture(t)
 		in := f.commentSequenceRequest(t)
 		f.receive(t, "trigger", in.Comment.RepliedAt.Add(time.Minute))
 		_, err := f.s.AdvanceAutomationReply(t.Context(), f.request)
 		require.NoError(t, err)
-		assert.Equal(t, SequenceWaitingResponse, f.advanceSequence(t, in).State)
+		skipped := f.advanceSequence(t, in)
+		assert.Equal(t, AutomationSkipped, skipped.State)
+		assert.Equal(t, stopReasonOwned, skipped.Reason)
 		assert.Len(t, f.replyRows(t), 1)
 	})
 	t.Run("the wait ends without sending", func(t *testing.T) {

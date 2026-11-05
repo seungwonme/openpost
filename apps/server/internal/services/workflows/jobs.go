@@ -84,6 +84,9 @@ func (s *Service) sweep(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := s.wakeRespondedRuns(ctx, now); err != nil {
+		return err
+	}
 	// Recover a run whose checkpoint committed but whose queue job exhausted
 	// infrastructure retries. Native effects retain the same idempotency key.
 	runs := []runRecord{}
@@ -210,7 +213,7 @@ func (s *Service) commitSourcePoll(ctx context.Context, record workflowRecord, d
 		if n, _ := current.RowsAffected(); n != 1 {
 			return nil
 		}
-		active, err := tx.NewSelect().Model((*runRecord)(nil)).Where("workspace_id = ? AND state IN (?)", record.WorkspaceID, bun.List([]string{StateQueued, StateRunning, StateWaiting, StateApproval})).Count(ctx)
+		active, err := countActiveRuns(ctx, tx, record.WorkspaceID)
 		if err != nil {
 			return err
 		}
@@ -285,7 +288,11 @@ func commentDailyLimitReached(ctx context.Context, db bun.IDB, record workflowRe
 	if !isInteractionSource(def.Source.Kind) {
 		return false, nil
 	}
-	count, err := db.NewSelect().Model((*runRecord)(nil)).Where("workflow_id = ? AND mode = ? AND created_at >= ?", record.ID, ModeLive, now.Truncate(24*time.Hour)).Count(ctx)
+	query := db.NewSelect().Model((*runRecord)(nil)).Where("workflow_id = ? AND mode = ? AND created_at >= ?", record.ID, ModeLive, now.Truncate(24*time.Hour))
+	if def.Source.Kind == "message_received" {
+		query = countMessageRuns(query)
+	}
+	count, err := query.Count(ctx)
 	return count >= def.Source.DailyLimit, err
 }
 
@@ -317,7 +324,7 @@ func (s *Service) admitSourceEvent(ctx context.Context, tx bun.Tx, record workfl
 		}
 	}
 	if def.Source.Kind == "message_received" {
-		return s.messageWorkflowWins(ctx, tx, record, item.ID)
+		return s.admitMessageEvent(ctx, tx, record, item, now)
 	}
 	return true, nil
 }

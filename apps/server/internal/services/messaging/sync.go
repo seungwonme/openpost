@@ -221,7 +221,7 @@ func (s *Service) persistConversationWithDB(ctx context.Context, tx bun.IDB, acc
 	}
 	newInbound := 0
 	for _, rm := range remote.Messages {
-		inserted, err := insertProviderMessage(ctx, tx, account, conversationID, rm, now)
+		inserted, err := s.storeProviderMessage(ctx, tx, account, conversationID, remote.CounterpartRemoteID, rm, now)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -233,9 +233,6 @@ func (s *Service) persistConversationWithDB(ctx context.Context, tx bun.IDB, acc
 			}
 			changes = append(changes, inboxchanges.Change{Kind: "message", ConversationID: conversationID, MessageID: localID})
 			if rm.Direction == "inbound" {
-				if err = s.recordMessageOptOut(ctx, tx, account, conversationID, remote.CounterpartRemoteID, rm); err != nil {
-					return nil, nil, err
-				}
 				newInbound++
 				received = append(received, receivedMessage{conversationID: conversationID, messageID: rm.ID, senderName: firstNonEmpty(remote.CounterpartName, remote.CounterpartHandle, "a social account"), provider: account.Platform})
 			}
@@ -317,6 +314,25 @@ func conversationSummaryChanged(existing models.Conversation, remote platform.Pr
 		existing.LastMessagePreview != remote.LastMessagePreview ||
 		existing.LastRemoteMessageID != remote.LastRemoteMessageID ||
 		!existing.MessagingWindowExpiresAt.Equal(remote.ReplyWindowExpiresAt)
+}
+
+// storeProviderMessage records what a provider message means for automation in
+// the transaction that stores it. An opt-out holds on every path, including a
+// redelivery or a repair. A takeover applies once, when the message is first stored.
+func (s *Service) storeProviderMessage(ctx context.Context, tx bun.IDB, account models.SocialAccount, conversationID, counterpart string, remote platform.ProviderMessage, now time.Time) (bool, error) {
+	inserted, err := insertProviderMessage(ctx, tx, account, conversationID, remote, now)
+	if err != nil {
+		return false, err
+	}
+	if err := s.recordMessageOptOut(ctx, tx, account, conversationID, counterpart, remote); err != nil {
+		return false, err
+	}
+	if inserted {
+		if err := s.recordProviderOutbound(ctx, tx, account, conversationID, remote); err != nil {
+			return false, err
+		}
+	}
+	return inserted, nil
 }
 
 func insertProviderMessage(ctx context.Context, db bun.IDB, account models.SocialAccount, conversationID string, remote platform.ProviderMessage, now time.Time) (bool, error) {

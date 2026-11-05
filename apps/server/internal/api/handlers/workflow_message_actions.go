@@ -33,7 +33,7 @@ func (a workflowActions) messageReply(ctx context.Context, in workflows.EffectRe
 // reason appears on the run; losing to another workflow is an ordinary outcome.
 func messageEffect(reply messaging.AutomationMessage, approve bool) (workflows.EffectResult, error) {
 	output := map[string]any{"message_id": reply.TriggerMessageID, "conversation_id": reply.ConversationID, "status": reply.State, "text": reply.Body, "reason": reply.Reason, "sent_message_id": reply.MessageID}
-	if reply.ID == "" {
+	if reply.ID == "" || reply.Reason == messaging.StopReasonSequenceActive {
 		return workflows.EffectResult{Stop: true, Output: output}, nil
 	}
 	switch reply.State {

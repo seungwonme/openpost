@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/openpost/backend/internal/services/workspaceaccess"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
 )
 
 type messageSourceFixture struct {
@@ -381,4 +383,155 @@ func (stopRecorder) Execute(context.Context, EffectRequest) (EffectResult, error
 func (r stopRecorder) StopReplies(_ context.Context, _ workspaceaccess.StoredAuthority, workflowID, _ string) error {
 	*r.stopped = append(*r.stopped, workflowID)
 	return nil
+}
+
+func (f *messageSourceFixture) conversation(t *testing.T, id, counterpart string) {
+	t.Helper()
+	now := time.Now().UTC()
+	row := models.Conversation{ID: id, WorkspaceID: "ws", SocialAccountID: "ig", Platform: "instagram", RemoteConversationID: "t-" + id, CounterpartRemoteID: counterpart, MessagingWindowExpiresAt: now.Add(24 * time.Hour), CreatedAt: now, UpdatedAt: now}
+	_, err := f.s.db.NewInsert().Model(&row).Exec(t.Context())
+	require.NoError(t, err)
+}
+
+func TestMessageDailyLimitCountsOnlyRunsThatCouldAnswer(t *testing.T) {
+	f := newMessageSourceFixture(t, "sqlite")
+	source := messageSource()
+	source.DailyLimit = 2
+	workflow := f.publish(t, source, nil)
+	f.conversation(t, "c-a", "reader-a")
+	f.conversation(t, "c-b", "reader-b")
+	f.conversation(t, "c-c", "reader-c")
+	f.message(t, models.DirectMessage{ID: "failed", ConversationID: "c-a", AuthorRemoteID: "reader-a", Body: "hi"})
+	f.message(t, models.DirectMessage{ID: "skipped", ConversationID: "c-b", AuthorRemoteID: "reader-b", Body: "hi"})
+	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+	require.Len(t, f.runSources(t, workflow.ID), 2)
+	_, err := f.s.db.NewRaw(`UPDATE workflow_runs SET state = 'failed' WHERE workflow_id = ? AND source_json LIKE '%failed%'`, workflow.ID).Exec(t.Context())
+	require.NoError(t, err)
+	_, err = f.s.db.NewRaw(`UPDATE workflow_runs SET state = 'succeeded', results_json = '[{"output":{"status":"skipped"}}]' WHERE workflow_id = ? AND source_json LIKE '%skipped%'`, workflow.ID).Exec(t.Context())
+	require.NoError(t, err)
+	f.message(t, models.DirectMessage{ID: "answered", ConversationID: "c-c", AuthorRemoteID: "reader-c", Body: "hi"})
+	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+	assert.Contains(t, f.runSources(t, workflow.ID), "answered")
+}
+
+func TestOneSenderCannotExhaustAWorkflowsDailyLimit(t *testing.T) {
+	f := newMessageSourceFixture(t, "sqlite")
+	workflow := f.publish(t, messageSource(), nil)
+	f.conversation(t, "c-other", "another-reader")
+	for i := range maxMessageRunsPerSender + 3 {
+		f.message(t, models.DirectMessage{ID: fmt.Sprintf("same-%d", i), AuthorRemoteID: "reader", Body: "hi", CreatedAt: time.Now().UTC().Add(time.Duration(i+1) * time.Minute)})
+	}
+	f.message(t, models.DirectMessage{ID: "other", ConversationID: "c-other", AuthorRemoteID: "another-reader", Body: "hi", CreatedAt: time.Now().UTC().Add(time.Hour)})
+	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+	sources := f.runSources(t, workflow.ID)
+	assert.Len(t, sources, maxMessageRunsPerSender+1)
+	assert.Contains(t, sources, "other")
+}
+
+func TestTakenOverConversationStartsNoRunEvenAfterResume(t *testing.T) {
+	f := newMessageSourceFixture(t, "sqlite")
+	workflow := f.publish(t, messageSource(), nil)
+	_, err := f.s.db.NewRaw(`INSERT INTO message_automation_stops(conversation_id,workspace_id,stopped_by,reason,stopped_at) VALUES('c-reader','ws','provider','person',?)`, time.Now().UTC()).Exec(t.Context())
+	require.NoError(t, err)
+	f.message(t, models.DirectMessage{ID: "during", AuthorRemoteID: "reader", Body: "hi"})
+	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+	assert.Empty(t, f.runSources(t, workflow.ID))
+
+	_, err = f.s.db.NewRaw(`DELETE FROM message_automation_stops WHERE conversation_id = 'c-reader'`).Exec(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+	assert.Empty(t, f.runSources(t, workflow.ID), "resume applies to future messages")
+	f.message(t, models.DirectMessage{ID: "after", AuthorRemoteID: "reader", Body: "hi"})
+	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+	assert.Equal(t, []string{"after"}, f.runSources(t, workflow.ID))
+}
+
+func (f *messageSourceFixture) parkedRun(t *testing.T, workflowID string, wakeAt time.Time) {
+	t.Helper()
+	_, err := f.s.db.NewRaw(`INSERT INTO workflow_runs(id,workflow_id,workspace_id,workflow_name,workflow_revision,mode,state,revision,definition_json,authority_json,source_json,remaining_json,results_json,wake_at,created_at,updated_at) VALUES('parked',?,'ws','DM',1,'live','waiting',1,'{}','{}','{}','[]','[]',?,?,?)`, workflowID, wakeAt, f.now, f.now).Exec(t.Context())
+	require.NoError(t, err)
+	_, err = f.s.db.NewRaw(`INSERT INTO message_sequence_waits(run_id,workspace_id,item_id,account_id,author_remote_id,replied_at,respond_by) VALUES('parked','ws','comment','ig','reader',?,?)`, f.now, wakeAt).Exec(t.Context())
+	require.NoError(t, err)
+}
+
+func (f *messageSourceFixture) parkedWake(t *testing.T) time.Time {
+	t.Helper()
+	var wake time.Time
+	require.NoError(t, f.s.db.NewSelect().Model((*runRecord)(nil)).Column("wake_at").Where("id = 'parked'").Scan(t.Context(), &wake))
+	return wake
+}
+
+func TestRunsWaitingForAResponseDoNotHoldTheActiveRunLimit(t *testing.T) {
+	f := newMessageSourceFixture(t, "sqlite")
+	workflow := f.publish(t, messageSource(), nil)
+	f.parkedRun(t, workflow.ID, f.now.Add(7*24*time.Hour))
+	count, err := countActiveRuns(t.Context(), f.s.db, "ws")
+	require.NoError(t, err)
+	assert.Zero(t, count)
+}
+
+func TestBatchedCheckWakesOnlyRunsWithSomethingToDo(t *testing.T) {
+	f := newMessageSourceFixture(t, "sqlite")
+	workflow := f.publish(t, messageSource(), nil)
+	far := f.now.Add(7 * 24 * time.Hour).Truncate(time.Second)
+	f.parkedRun(t, workflow.ID, far)
+
+	require.NoError(t, f.s.wakeRespondedRuns(t.Context(), f.now.Add(time.Minute)))
+	assert.WithinDuration(t, far, f.parkedWake(t), time.Second, "nothing happened")
+
+	f.message(t, models.DirectMessage{ID: "older", AuthorRemoteID: "reader", Body: "hi", RemoteCreatedAt: f.now.Add(-time.Hour)})
+	require.NoError(t, f.s.wakeRespondedRuns(t.Context(), f.now.Add(time.Minute)))
+	assert.WithinDuration(t, far, f.parkedWake(t), time.Second, "a message from before the private reply is not a response")
+
+	f.message(t, models.DirectMessage{ID: "response", AuthorRemoteID: "reader", Body: "hi", RemoteCreatedAt: f.now.Add(time.Minute)})
+	wakeAt := f.now.Add(2 * time.Minute)
+	require.NoError(t, f.s.wakeRespondedRuns(t.Context(), wakeAt))
+	assert.WithinDuration(t, wakeAt, f.parkedWake(t), time.Second)
+}
+
+func TestBatchedCheckWakesARunThatMustStop(t *testing.T) {
+	for name, stop := range map[string]func(*testing.T, *messageSourceFixture){
+		"the person opted out": func(t *testing.T, f *messageSourceFixture) {
+			_, err := f.s.db.NewRaw(`INSERT INTO engagement_automation_optouts(social_account_id,author_remote_id,created_at) VALUES('ig','reader',?)`, f.now).Exec(t.Context())
+			require.NoError(t, err)
+		},
+		"someone took over the comment": func(t *testing.T, f *messageSourceFixture) {
+			_, err := f.s.db.NewInsert().Model(&models.EngagementItem{ID: "comment", WorkspaceID: "ws", SocialAccountID: "ig", RemoteID: "remote", Body: "guide", AuthorRemoteID: "reader", Platform: "instagram", RemoteCreatedAt: f.now, AutomationStoppedAt: f.now, CreatedAt: f.now, UpdatedAt: f.now}).Exec(t.Context())
+			require.NoError(t, err)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newMessageSourceFixture(t, "sqlite")
+			workflow := f.publish(t, messageSource(), nil)
+			f.parkedRun(t, workflow.ID, f.now.Add(7*24*time.Hour))
+			stop(t, f)
+			wakeAt := f.now.Add(time.Minute)
+			require.NoError(t, f.s.wakeRespondedRuns(t.Context(), wakeAt))
+			assert.WithinDuration(t, wakeAt, f.parkedWake(t), time.Second)
+		})
+	}
+}
+
+func TestBatchedCheckClearsFinishedWaits(t *testing.T) {
+	f := newMessageSourceFixture(t, "sqlite")
+	workflow := f.publish(t, messageSource(), nil)
+	f.parkedRun(t, workflow.ID, f.now.Add(time.Hour))
+	_, err := f.s.db.NewRaw(`UPDATE workflow_runs SET state = 'cancelled' WHERE id = 'parked'`).Exec(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, f.s.wakeRespondedRuns(t.Context(), f.now))
+	remaining, err := f.s.db.NewSelect().Table("message_sequence_waits").Count(t.Context())
+	require.NoError(t, err)
+	assert.Zero(t, remaining)
+}
+
+func TestTakeoverCancelsACommentRunWaitingForThatPerson(t *testing.T) {
+	f := newMessageSourceFixture(t, "sqlite")
+	workflow := f.publish(t, messageSource(), nil)
+	f.parkedRun(t, workflow.ID, f.now.Add(time.Hour))
+	require.NoError(t, f.s.db.RunInTx(t.Context(), nil, func(ctx context.Context, tx bun.Tx) error {
+		return f.s.CancelMessageAutomationRuns(ctx, tx, "ws", "c-reader", nil, "A person took over this conversation.")
+	}))
+	var state string
+	require.NoError(t, f.s.db.NewSelect().Model((*runRecord)(nil)).Column("state").Where("id = 'parked'").Scan(t.Context(), &state))
+	assert.Equal(t, StateCancelled, state)
 }

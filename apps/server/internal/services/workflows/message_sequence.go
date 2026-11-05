@@ -1,11 +1,14 @@
 package workflows
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/uptrace/bun"
 )
 
 // KindMessageSequence sends ordered follow-ups after a person's response.
@@ -23,6 +26,31 @@ const (
 type SequenceMessage struct {
 	Text         string `json:"text"`
 	DelayMinutes int    `json:"delay_minutes"`
+}
+
+// countActiveRuns is the workspace limit. A run waiting for a person's response
+// can wait for days and uses no worker until it wakes, so people who never respond
+// cannot block every other workflow.
+func countActiveRuns(ctx context.Context, db bun.IDB, workspaceID string) (int, error) {
+	return db.NewSelect().Model((*runRecord)(nil)).Where("workspace_id = ? AND state IN (?)", workspaceID, bun.List([]string{StateQueued, StateRunning, StateWaiting, StateApproval})).
+		Where("id NOT IN (SELECT run_id FROM message_sequence_waits)").Count(ctx)
+}
+
+// wakeRespondedRuns is one batched check from the workflow sweep. It wakes a run
+// only when something it waits for has happened, so waiting costs no workspace
+// lock and no provider call per run.
+func (s *Service) wakeRespondedRuns(ctx context.Context, now time.Time) error {
+	_, err := s.db.NewUpdate().Model((*runRecord)(nil)).Set("wake_at = ?", now).
+		Where("state = ? AND wake_at > ?", StateWaiting, now).
+		Where(`id IN (SELECT w.run_id FROM message_sequence_waits w WHERE
+			EXISTS (SELECT 1 FROM conversations c JOIN direct_messages d ON d.conversation_id = c.id WHERE c.social_account_id = w.account_id AND c.counterpart_remote_id = w.author_remote_id AND c.platform = 'instagram' AND d.direction = 'inbound' AND d.deleted_at IS NULL AND d.remote_created_at > w.replied_at AND d.remote_created_at <= w.respond_by)
+			OR EXISTS (SELECT 1 FROM engagement_automation_optouts o WHERE o.social_account_id = w.account_id AND o.author_remote_id = w.author_remote_id)
+			OR EXISTS (SELECT 1 FROM engagement_items i WHERE i.id = w.item_id AND (i.automation_stopped_at IS NOT NULL OR i.deleted_at IS NOT NULL)))`).Exec(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.NewRaw(`DELETE FROM message_sequence_waits WHERE run_id IN (SELECT id FROM workflow_runs WHERE state NOT IN (?))`, bun.List([]string{StateQueued, StateRunning, StateWaiting, StateApproval})).Exec(ctx)
+	return err
 }
 
 // A sequence reads each position's text from its receipt, so one review must not

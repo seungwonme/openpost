@@ -54,7 +54,7 @@ func (s *Service) admitRun(ctx context.Context, record workflowRecord, definitio
 		if err := organizationguard.LockWorkspace(ctx, tx, workspaceID); err != nil {
 			return err
 		}
-		count, err := tx.NewSelect().Model((*runRecord)(nil)).Where("workspace_id = ? AND state IN (?)", workspaceID, bun.List([]string{StateQueued, StateRunning, StateWaiting, StateApproval})).Count(ctx)
+		count, err := countActiveRuns(ctx, tx, workspaceID)
 		if err != nil {
 			return err
 		}

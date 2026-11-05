@@ -23,3 +23,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS message_automation_trigger_idx
 
 CREATE UNIQUE INDEX IF NOT EXISTS message_automation_step_idx
   ON message_automation_replies (run_id, step_id, sequence_position);
+
+-- A run waiting for a person's response is parked until a batched check wakes it.
+-- These runs can wait for days, so they do not count as active workspace runs.
+CREATE TABLE IF NOT EXISTS message_sequence_waits (
+  run_id TEXT PRIMARY KEY REFERENCES workflow_runs(id) ON DELETE CASCADE,
+  workspace_id TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  account_id TEXT NOT NULL,
+  author_remote_id TEXT NOT NULL,
+  replied_at TIMESTAMP NOT NULL,
+  respond_by TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS message_sequence_waits_author_idx
+  ON message_sequence_waits (account_id, author_remote_id);
