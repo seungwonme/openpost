@@ -2064,6 +2064,7 @@
 	"accounts_oauth_account_selection_failed": "OpenPost no pudo obtener las cuentas disponibles. Comprueba los permisos del proveedor y el acceso a las cuentas y vuelve a conectar.",
 	"accounts_oauth_account_save_failed": "OpenPost no pudo guardar la conexión. Comprueba el acceso al espacio de trabajo y los límites del plan y vuelve a conectar.",
 	"accounts_oauth_facebook_no_pages": "Facebook no ha compartido ninguna página gestionable. Crea una página, solicita acceso a páginas o revisa los permisos de la aplicación de Facebook y vuelve a intentarlo.",
+	"accounts_oauth_instagram_no_assigned_account": "Instagram no encontró ninguna cuenta profesional compartida con esta app. Vuelve a iniciar sesión, elige la cartera comercial propietaria de la cuenta y comparte la cuenta de Instagram.",
 	"accounts_oauth_instagram_no_page_linked_account": "Instagram necesita una cuenta Business o Creator vinculada a una página de Facebook que puedas gestionar. Vincula la cuenta a una página, comprueba tu acceso a la página y vuelve a conectarla.",
 	"accounts_oauth_confirm_title": "Conectar {platform}",
 	"accounts_oauth_confirm_description": "Esto es lo que pasará a continuación.",

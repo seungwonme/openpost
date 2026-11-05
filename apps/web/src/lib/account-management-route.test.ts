@@ -112,6 +112,25 @@ describe('account management route URL interpretation', () => {
 		});
 	});
 
+	it('explains when Unified Login shared no Instagram account', () => {
+		const state = interpretAccountManagementURL(
+			new URL(
+				'https://openpost.test/settings?tab=accounts&oauth_status=failed&oauth_reason=instagram_no_assigned_account&workspace_id=workspace-62'
+			)
+		);
+
+		expect(state).toEqual({
+			feedback: { kind: 'instagram_no_assigned_account' },
+			workspaceID: 'workspace-62',
+			cleanHref: '/settings?tab=accounts'
+		});
+		expect(presentAccountManagementFeedback(state.feedback)).toEqual({
+			tone: 'error',
+			message:
+				'Instagram found no professional account shared with this app. Log in again, choose the business portfolio that owns the account, and share the Instagram account.'
+		});
+	});
+
 	it('explains when Instagram has no professional account linked to a managed Page', () => {
 		const state = interpretAccountManagementURL(
 			new URL(

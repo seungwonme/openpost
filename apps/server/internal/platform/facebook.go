@@ -87,6 +87,19 @@ func (f *FacebookAdapter) ExchangeCode(ctx context.Context, code string, _ map[s
 }
 
 func exchangeMetaAuthCode(ctx context.Context, graphURL func(string) string, clientID, clientSecret, redirectURI, providerName, code string) (*TokenResult, error) {
+	tokenResp, err := exchangeMetaCode(ctx, graphURL, clientID, clientSecret, redirectURI, providerName, code)
+	if err != nil {
+		return nil, err
+	}
+
+	longLived, err := exchangeMetaLongLivedToken(ctx, graphURL, clientID, clientSecret, providerName, tokenResp.AccessToken)
+	if err != nil {
+		return tokenResp, nil
+	}
+	return longLived, nil
+}
+
+func exchangeMetaCode(ctx context.Context, graphURL func(string) string, clientID, clientSecret, redirectURI, providerName, code string) (*TokenResult, error) {
 	params := url.Values{}
 	params.Set(oauthParamClientID, clientID)
 	params.Set(oauthParamClientSecret, clientSecret)
@@ -99,16 +112,7 @@ func exchangeMetaAuthCode(ctx context.Context, graphURL func(string) string, cli
 		return nil, fmt.Errorf("%s: %w", label, err)
 	}
 
-	tokenResp, err := decodeFacebookToken(label, respBody)
-	if err != nil {
-		return nil, err
-	}
-
-	longLived, err := exchangeMetaLongLivedToken(ctx, graphURL, clientID, clientSecret, providerName, tokenResp.AccessToken)
-	if err != nil {
-		return tokenResp, nil
-	}
-	return longLived, nil
+	return decodeFacebookToken(label, respBody)
 }
 
 func exchangeMetaLongLivedToken(ctx context.Context, graphURL func(string) string, clientID, clientSecret, providerName, accessToken string) (*TokenResult, error) {

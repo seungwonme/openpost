@@ -3284,12 +3284,16 @@ func (h *PublicationHandler) validatePublicationByIDWithDB(ctx context.Context, 
 }
 
 func instagramLoginSettingsIssues(account models.SocialAccount, rendition models.Rendition, settings map[string]any) []capabilities.ValidationIssue {
+	capability := capabilities.Capability{
+		Provider: rendition.Platform, Profile: rendition.Profile, OutputProfile: rendition.OutputProfile,
+	}
+	if isInstagramUnifiedAccount(account) {
+		return capabilities.InstagramUnifiedSettingsIssues(capability, settings)
+	}
 	if !isInstagramLoginAccount(account) {
 		return nil
 	}
-	return capabilities.InstagramLoginSettingsIssues(capabilities.Capability{
-		Provider: rendition.Platform, Profile: rendition.Profile, OutputProfile: rendition.OutputProfile,
-	}, settings)
+	return capabilities.InstagramLoginSettingsIssues(capability, settings)
 }
 
 func instagramLoginMediaSettingsIssues(account models.SocialAccount, rendition models.Rendition, media MediaSummary) []capabilities.ValidationIssue {

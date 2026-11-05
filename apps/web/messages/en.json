@@ -2107,6 +2107,7 @@
 	"accounts_oauth_account_selection_failed": "OpenPost could not list the available accounts. Check your provider permissions and account access, then reconnect.",
 	"accounts_oauth_account_save_failed": "OpenPost could not save the connection. Check workspace access and plan limits, then reconnect.",
 	"accounts_oauth_facebook_no_pages": "Facebook did not share any manageable Pages. Create a Page, request Page access, or check the Facebook app permissions, then try again.",
+	"accounts_oauth_instagram_no_assigned_account": "Instagram found no professional account shared with this app. Log in again, choose the business portfolio that owns the account, and share the Instagram account.",
 	"accounts_oauth_instagram_no_page_linked_account": "Instagram needs a Business or Creator account linked to a Facebook Page you can manage. Link the account to a Page, check your Page access, then reconnect.",
 	"accounts_oauth_confirm_title": "Connect {platform}",
 	"accounts_oauth_confirm_description": "Here is what will happen next.",

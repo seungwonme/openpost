@@ -54,5 +54,6 @@ checkout can move or be renamed without starting on an empty volume.
 | `apps/server/internal/services/trackedlinks/`                                       | Tracked redirect links (`/go/:slug`)                                 |
 | `apps/server/internal/services/instagramwebhook/`                                   | Subscribes Instagram accounts to Meta webhooks and records readiness |
 | `apps/server/internal/platform/instagram_webhook_subscription.go`                   | Instagram `/subscribed_apps` request per login mode                  |
+| `apps/server/internal/platform/instagram_unified.go`                                | Instagram Unified Login token detection and account discovery        |
 | `apps/server/internal/models/instagram_webhook_subscription.go`                     | Subscription attempt model                                           |
 | `apps/server/internal/database/migrations/9002_instagram_webhook_subscriptions.sql` | Subscription attempts table                                          |

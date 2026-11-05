@@ -50,6 +50,7 @@ type InstagramAdapter struct {
 	redirectURI    string
 	graphVersion   string
 	instagramLogin bool
+	unifiedLogin   bool
 	configID       string
 }
 
@@ -80,6 +81,11 @@ func (i *InstagramAdapter) graphURL(path string) string {
 func (i *InstagramAdapter) SearchPublishingOptions(ctx context.Context, accessToken string, input PublishingOptionsInput) (PublishingOptionsPage, error) {
 	if i.instagramLogin {
 		return PublishingOptionsPage{}, fmt.Errorf("instagram location search requires a Facebook Login connection")
+	}
+	if i.unifiedLogin {
+		// Location IDs come from Facebook Page search, which Meta documents no
+		// equivalent of for a system user token with no Page.
+		return PublishingOptionsPage{}, fmt.Errorf("instagram location search requires a Facebook Login connection with a linked Page")
 	}
 	if input.Source != "instagram_locations" {
 		return PublishingOptionsPage{}, fmt.Errorf("instagram publishing option source %q is not supported", input.Source)
@@ -163,6 +169,9 @@ func (i *InstagramAdapter) GenerateAuthURL(state string) (string, map[string]str
 func (i *InstagramAdapter) ExchangeCode(ctx context.Context, code string, _ map[string]string) (*TokenResult, error) {
 	if i.instagramLogin {
 		return i.exchangeInstagramLoginCode(ctx, code)
+	}
+	if i.configID != "" {
+		return i.exchangeConfigurationCode(ctx, code)
 	}
 	token, err := exchangeMetaAuthCode(ctx, i.graphURL, i.clientID, i.clientSecret, i.redirectURI, "instagram", code)
 	if err != nil {
@@ -249,6 +258,9 @@ func (i *InstagramAdapter) RefreshAccountMetadata(ctx context.Context, accessTok
 }
 
 func (i *InstagramAdapter) ListAccountSelections(ctx context.Context, token *TokenResult) ([]AccountSelectionOption, error) {
+	if isInstagramUnifiedToken(token) {
+		return i.listUnifiedAccountSelections(ctx, token)
+	}
 	pages, err := i.listInstagramPages(ctx, token)
 	if err != nil {
 		return nil, err
@@ -273,6 +285,9 @@ func (i *InstagramAdapter) ListAccountSelections(ctx context.Context, token *Tok
 }
 
 func (i *InstagramAdapter) SelectAccount(ctx context.Context, token *TokenResult, selectionID string) (*SelectedAccount, error) {
+	if isInstagramUnifiedToken(token) {
+		return i.selectUnifiedAccount(ctx, token, selectionID)
+	}
 	pages, err := i.listInstagramPages(ctx, token)
 	if err != nil {
 		return nil, err

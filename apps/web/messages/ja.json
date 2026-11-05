@@ -2064,6 +2064,7 @@
 	"accounts_oauth_account_selection_failed": "OpenPostで利用可能なアカウントを取得できませんでした。プロバイダーの権限とアカウントへのアクセスを確認して、再接続してください。",
 	"accounts_oauth_account_save_failed": "OpenPostで接続を保存できませんでした。ワークスペースへのアクセスとプランの上限を確認して、再接続してください。",
 	"accounts_oauth_facebook_no_pages": "Facebookから管理できるページが共有されませんでした。ページを作成するか、ページへのアクセスを要求するか、Facebookアプリの権限を確認して、もう一度お試しください。",
+	"accounts_oauth_instagram_no_assigned_account": "このアプリに共有されたプロアカウントがInstagramで見つかりませんでした。再度ログインし、アカウントを所有するビジネスポートフォリオを選択して、Instagramアカウントを共有してください。",
 	"accounts_oauth_instagram_no_page_linked_account": "Instagramには、管理できるFacebookページにリンクされたビジネスまたはクリエイターアカウントが必要です。アカウントをページにリンクし、ページへのアクセスを確認してから再接続してください。",
 	"accounts_oauth_confirm_title": "{platform}を接続する",
 	"accounts_oauth_confirm_description": "次に行うことは次のとおりです。",

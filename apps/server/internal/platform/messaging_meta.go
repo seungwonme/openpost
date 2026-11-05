@@ -44,6 +44,13 @@ func (i *InstagramAdapter) MessagingSupport() MessagingSupport {
 			Unavailable: "Instagram messages require approved Instagram Login permissions. A person must message the professional account first.",
 		}
 	}
+	if i.unifiedLogin {
+		return MessagingSupport{
+			Enabled: true, CanSend: true, RequiresOptIn: true, ReplyWindow: 24 * time.Hour,
+			RequiredScopes: InstagramUnifiedMessagingScopes(), ConversationModel: "professional_message",
+			Unavailable: "Instagram messages require instagram_basic and instagram_manage_messages in the Unified Login configuration. A person must message the professional account first.",
+		}
+	}
 	return MessagingSupport{
 		Enabled: true, CanSend: true, RequiresOptIn: true, ReplyWindow: 24 * time.Hour,
 		RequiredScopes: []string{"instagram_basic", "instagram_manage_messages", "pages_manage_metadata"}, ConversationModel: "professional_message",

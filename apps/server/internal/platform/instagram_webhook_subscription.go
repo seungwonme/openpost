@@ -25,10 +25,11 @@ const (
 
 // ErrInstagramWebhookUnsupported means the connection has no documented
 // subscription edge, or the data needed to address it is missing.
-var ErrInstagramWebhookUnsupported = errors.New("instagram webhook subscription requires the linked Facebook Page")
+var ErrInstagramWebhookUnsupported = errors.New("instagram webhook subscription is missing the account or token it needs")
 
 // InstagramWebhookSubscription names one connected account. PageID is only
-// used by Facebook Login, whose edge belongs to the linked Page.
+// used by Facebook Login, whose edge belongs to the linked Page. Instagram
+// Login and Unified Login accounts have no Page.
 type InstagramWebhookSubscription struct {
 	AccessToken string
 	AccountID   string
@@ -46,12 +47,13 @@ type InstagramWebhookSubscriber interface {
 //   - Instagram Login: graph.instagram.com/{ig-id}/subscribed_apps, Instagram
 //     User token.
 //   - Facebook Login: graph.facebook.com/{page-id}/subscribed_apps, Page token.
+//   - Unified Login: graph.facebook.com/{ig-id}/subscribed_apps, the Business
+//     Integration System User token from the code exchange.
 //
-// Unified Login needs a Business Integration System User token that OpenPost
-// never holds, so it has no path here. The call is idempotent at Meta.
+// The call is idempotent at Meta.
 func (i *InstagramAdapter) SubscribeInstagramWebhooks(ctx context.Context, in InstagramWebhookSubscription) error {
 	owner := in.AccountID
-	if !i.instagramLogin {
+	if !i.instagramLogin && !i.unifiedLogin {
 		owner = in.PageID
 		if owner == "" {
 			return ErrInstagramWebhookUnsupported
@@ -86,7 +88,7 @@ const instagramWebhookRetryHint = "Retry by toggling the feature off and on, or 
 func ClassifyInstagramWebhookError(err error) InstagramWebhookFailure {
 	if errors.Is(err, ErrInstagramWebhookUnsupported) {
 		return InstagramWebhookFailure{Code: InstagramWebhookUnsupportedConnection,
-			Message: "This connection cannot be subscribed to Instagram webhooks. Reconnect the account with Instagram Login or Facebook Login with a linked Page."}
+			Message: "This connection cannot be subscribed to Instagram webhooks. Reconnect the account with Instagram Login, Unified Login, or Facebook Login with a linked Page."}
 	}
 	var providerErr *HTTPError
 	if !errors.As(err, &providerErr) {
