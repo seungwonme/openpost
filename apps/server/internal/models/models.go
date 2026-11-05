@@ -1778,6 +1778,7 @@ type EngagementAttachment struct {
 type EngagementItem struct {
 	AutomationState     string    `bun:"-" json:"automation_state,omitempty"`
 	AutomationRunID     string    `bun:"-" json:"automation_run_id,omitempty"`
+	AuthorOptedOut      bool      `bun:"-" json:"author_opted_out,omitempty"`
 	AutomationStoppedAt time.Time `bun:"automation_stopped_at,nullzero" json:"automation_stopped_at,omitempty,omitzero"`
 	RepliedAt           time.Time `bun:"replied_at,nullzero" json:"replied_at,omitempty,omitzero"`
 	bun.BaseModel       `bun:"table:engagement_items"`

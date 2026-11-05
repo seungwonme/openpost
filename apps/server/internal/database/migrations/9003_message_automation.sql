@@ -40,7 +40,10 @@ CREATE TABLE IF NOT EXISTS message_automation_stops (
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   stopped_by TEXT NOT NULL DEFAULT '',
   reason TEXT NOT NULL DEFAULT '',
-  stopped_at TIMESTAMP NOT NULL
+  stopped_at TIMESTAMP NOT NULL,
+  -- NULL stays until someone resumes. A takeover inferred from a person's message
+  -- lapses when no further human message follows.
+  lapses_at TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS direct_messages_automation_source_idx
@@ -51,3 +54,38 @@ CREATE INDEX IF NOT EXISTS direct_messages_automation_source_idx
 CREATE TABLE IF NOT EXISTS message_history_imports (
   message_id TEXT PRIMARY KEY REFERENCES direct_messages(id) ON DELETE CASCADE
 );
+
+-- One automated send claims at most one echo stored under a different provider ID,
+-- so a person repeating the same text afterwards still counts as a person.
+-- A message can be merged away, so the claim outlives it.
+CREATE TABLE IF NOT EXISTS message_automation_echoes (
+  receipt_id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  message_id TEXT NOT NULL,
+  receipt_state TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS message_automation_echoes_message_idx
+  ON message_automation_echoes (message_id);
+
+-- A message that may be asking to opt out hands the conversation to a person once.
+-- Reading the message again after someone resumes does not hand it over again.
+CREATE TABLE IF NOT EXISTS message_optout_reviews (
+  message_id TEXT PRIMARY KEY REFERENCES direct_messages(id) ON DELETE CASCADE,
+  created_at TIMESTAMP NOT NULL
+);
+
+-- Removing an opt-out is an operator decision, kept with who made it and when.
+CREATE TABLE IF NOT EXISTS automation_optout_removals (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  social_account_id TEXT NOT NULL REFERENCES social_accounts(id) ON DELETE CASCADE,
+  author_remote_id TEXT NOT NULL,
+  removed_by TEXT NOT NULL,
+  opted_out_at TIMESTAMP NOT NULL,
+  removed_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS automation_optout_removals_author_idx
+  ON automation_optout_removals (social_account_id, author_remote_id, removed_at);

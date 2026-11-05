@@ -12,6 +12,7 @@ import (
 	"github.com/openpost/backend/internal/idempotency"
 	"github.com/openpost/backend/internal/models"
 	"github.com/openpost/backend/internal/platform"
+	"github.com/openpost/backend/internal/services/automationoptout"
 	"github.com/openpost/backend/internal/services/organizationguard"
 	"github.com/openpost/backend/internal/services/workspaceaccess"
 	"github.com/uptrace/bun"
@@ -266,6 +267,65 @@ func (s *Service) StopAutomation(ctx context.Context, actor Actor, workspaceID, 
 		return appendEngagementChange(ctx, tx, item)
 	})
 }
+
+// loadOptedOutAuthors is one read for a page of comments, keyed by account and author.
+func (s *Service) loadOptedOutAuthors(ctx context.Context, items []models.EngagementItem) (map[string]bool, error) {
+	accounts := map[string]bool{}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if !accounts[item.SocialAccountID] {
+			accounts[item.SocialAccountID] = true
+			ids = append(ids, item.SocialAccountID)
+		}
+	}
+	var rows []struct {
+		Account string `bun:"social_account_id"`
+		Author  string `bun:"author_remote_id"`
+	}
+	if err := s.db.NewSelect().Table("engagement_automation_optouts").Column("social_account_id", "author_remote_id").Where("social_account_id IN (?)", bun.List(ids)).Scan(ctx, &rows); err != nil {
+		return nil, err
+	}
+	result := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		result[row.Account+"\x00"+row.Author] = true
+	}
+	return result, nil
+}
+
+// AutomationOptOut reads whether this comment's author opted out on this account.
+func (s *Service) AutomationOptOut(ctx context.Context, actor Actor, workspaceID, itemID string) (automationoptout.State, error) {
+	if err := s.authorize(ctx, workspaceID, actor, workspaceaccess.LevelRead); err != nil {
+		return automationoptout.State{}, err
+	}
+	var item models.EngagementItem
+	if err := s.db.NewSelect().Model(&item).Where("id = ? AND workspace_id = ?", itemID, workspaceID).Scan(ctx); err != nil {
+		return automationoptout.State{}, ErrNotFound
+	}
+	return automationoptout.Read(ctx, s.db, item.SocialAccountID, item.AuthorRemoteID)
+}
+
+// RemoveAutomationOptOut is the same operator decision as removing it from a
+// conversation: the opt-out covers this person on comments and direct messages.
+func (s *Service) RemoveAutomationOptOut(ctx context.Context, actor Actor, workspaceID, itemID string) error {
+	if err := s.authorize(ctx, workspaceID, actor, workspaceaccess.LevelEdit); err != nil {
+		return err
+	}
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if err := organizationguard.LockWorkspace(ctx, tx, workspaceID); err != nil {
+			return err
+		}
+		var item models.EngagementItem
+		if err := tx.NewSelect().Model(&item).Where("id = ? AND workspace_id = ?", itemID, workspaceID).Scan(ctx); err != nil {
+			return ErrNotFound
+		}
+		removed, err := automationoptout.Remove(ctx, tx, workspaceID, item.SocialAccountID, item.AuthorRemoteID, actor.UserID, s.now())
+		if err != nil || !removed {
+			return err
+		}
+		return appendEngagementChange(ctx, tx, item)
+	})
+}
+
 func (s *Service) checkAutomationWrite(ctx context.Context, db bun.IDB, item models.EngagementItem, input engagementActionJob) error {
 	if input.AutomationID == "" {
 		return nil

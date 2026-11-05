@@ -6,6 +6,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/openpost/backend/internal/api/middleware"
+	"github.com/openpost/backend/internal/services/automationoptout"
 	"github.com/openpost/backend/internal/services/engagement"
 )
 
@@ -14,6 +15,7 @@ type EngagementAutomationInput struct {
 	WorkspaceID string `query:"workspace_id" required:"true"`
 }
 type EngagementAutomationOutput struct{ Body []engagement.AutomationReply }
+type EngagementOptOutOutput struct{ Body automationoptout.State }
 
 func (h *EngagementMessagingHandler) registerAutomation(api huma.API) {
 	operation := func(id, method, path, summary string) huma.Operation {
@@ -41,5 +43,18 @@ func (h *EngagementMessagingHandler) registerAutomation(api huma.API) {
 			return nil, engagementHTTPError(err, "could not load automatic replies")
 		}
 		return &EngagementAutomationOutput{Body: rows}, nil
+	})
+	huma.Register(api, operation("remove-engagement-automation-opt-out", http.MethodPost, "/engagement/{id}/automation/opt-out/remove", "Remove this comment author's opt-out from automatic messages and replies"), func(ctx context.Context, in *EngagementAutomationInput) (*EngagementOptOutOutput, error) {
+		if h.engagement == nil {
+			return nil, huma.Error503ServiceUnavailable("Inbox is unavailable")
+		}
+		if err := h.engagement.RemoveAutomationOptOut(ctx, engagementActor(ctx), in.WorkspaceID, in.ID); err != nil {
+			return nil, engagementHTTPError(err, "could not remove the opt-out")
+		}
+		state, err := h.engagement.AutomationOptOut(ctx, engagementActor(ctx), in.WorkspaceID, in.ID)
+		if err != nil {
+			return nil, engagementHTTPError(err, "could not load the opt-out")
+		}
+		return &EngagementOptOutOutput{Body: state}, nil
 	})
 }

@@ -523,6 +523,8 @@ func TestDMOperatorTypingAnEarlierAutomatedPhraseIsAPerson(t *testing.T) {
 	first = h.advance(t, first.ID)
 	require.Equal(t, workflows.StateSucceeded, first.State)
 	require.Len(t, *h.sent, 1)
+	// The echo arrives under the send's own ID, which spends the text match.
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("sent-remote-id", "outbound", "owner", "thanks", base.Add(500*time.Millisecond))))
 	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.2", "inbound", "reader", "guide again", base.Add(time.Second))))
 	h.poll(t)
 	var second workflows.Run
@@ -545,4 +547,30 @@ func (h *dmHarness) igConversation(t *testing.T) string {
 	var id string
 	require.NoError(t, h.db.NewSelect().Model((*models.Conversation)(nil)).Column("id").Where("social_account_id = 'ig'").Scan(t.Context(), &id))
 	return id
+}
+
+func TestDMExpiredSequenceApprovalStopsBlockingTheNextTrigger(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmSequenceStep("review")})
+	run := h.advance(t, h.startSequence(t))
+	require.Equal(t, workflows.StateApproval, run.State)
+	conversation := h.igConversation(t)
+	_, err := h.db.NewUpdate().Model((*models.Conversation)(nil)).Set("messaging_window_expires_at = ?", time.Now().UTC().Add(-time.Minute)).Where("id = ?", conversation).Exec(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, h.service.HandleJob(t.Context(), jobregistry.TypeWorkflowSweep, "{}"))
+	ended, err := h.service.GetRun(t.Context(), h.actor, "ws", run.ID)
+	require.NoError(t, err)
+	require.Equal(t, workflows.StateCancelled, ended.State)
+	require.Contains(t, ended.Error, "messaging window closed")
+
+	time.Sleep(5 * time.Millisecond)
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.next", "inbound", "reader", "guide", time.Now().UTC())))
+	h.poll(t)
+	var next workflows.Run
+	for _, candidate := range h.runs(t) {
+		if candidate.ID != run.ID {
+			next = candidate
+		}
+	}
+	require.NotEmpty(t, next.ID)
+	require.Equal(t, workflows.StateApproval, h.advance(t, next.ID).State, "the next message starts its own sequence")
 }

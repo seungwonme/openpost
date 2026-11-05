@@ -178,6 +178,20 @@ export function takeOverConversation(ws: string, conversationID: string) {
 		})
 	);
 }
+export function removeConversationOptOut(ws: string, conversationID: string) {
+	return mutation(ws, () =>
+		client.POST('/messages/{conversation_id}/automation/opt-out/remove', {
+			params: { query: { workspace_id: ws }, path: { conversation_id: conversationID } }
+		})
+	);
+}
+export function removeCommentOptOut(ws: string, id: string) {
+	return mutation(ws, () =>
+		client.POST('/engagement/{id}/automation/opt-out/remove', {
+			params: { query: { workspace_id: ws }, path: { id } }
+		})
+	);
+}
 export function resumeConversationAutomation(ws: string, conversationID: string) {
 	return mutation(ws, () =>
 		client.POST('/messages/{conversation_id}/automation/resume', {

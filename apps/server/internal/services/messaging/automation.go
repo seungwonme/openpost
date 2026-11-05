@@ -5,12 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/openpost/backend/internal/models"
 	"github.com/openpost/backend/internal/platform"
+	"github.com/openpost/backend/internal/services/automationoptout"
 	"github.com/openpost/backend/internal/services/inboxchanges"
 	"github.com/openpost/backend/internal/services/organizationguard"
 	"github.com/openpost/backend/internal/services/providerwrite"
@@ -38,10 +40,14 @@ const (
 	maxAutomatedRepliesPerDay = 20
 	// A send whose job vanished must not hold a run in a five-second poll forever.
 	automationDeliveryTimeout = time.Hour
-	// How close in time an echo can be matched to an unconfirmed send by its text.
-	automationEchoBound = 15 * time.Minute
+	// How close in time an echo can be matched to an automated send by its text,
+	// when the provider reports it under a different ID.
+	automationEchoBound = time.Hour
 	// A provider outbound message older than the reply window is not a takeover.
 	automationTakeoverRecency = 24 * time.Hour
+	// A takeover inferred from a person's message ends this long after their last
+	// one. People stop answering a conversation without ever pressing Resume.
+	automationTakeoverLapse = 7 * 24 * time.Hour
 
 	stopReasonOptedOut  = "This person opted out of automatic messages."
 	stopReasonTakeover  = "A person took over this conversation."
@@ -93,13 +99,23 @@ type automationStop struct {
 	StoppedBy      string
 	Reason         string
 	StoppedAt      time.Time
+	LapsesAt       time.Time `bun:"lapses_at,nullzero"`
+}
+
+func (stop automationStop) active(now time.Time) bool {
+	return stop.LapsesAt.IsZero() || stop.LapsesAt.After(now)
 }
 
 // ConversationAutomation is the Inbox view of automation in one conversation.
 type ConversationAutomation struct {
-	StoppedAt  *time.Time          `json:"stopped_at,omitempty"`
-	StopReason string              `json:"stop_reason,omitempty"`
-	Replies    []AutomationMessage `json:"replies"`
+	StoppedAt  *time.Time `json:"stopped_at,omitempty"`
+	StopReason string     `json:"stop_reason,omitempty"`
+	// LapsesAt is when an active takeover ends unless a person sends another message.
+	LapsesAt *time.Time `json:"lapses_at,omitempty"`
+	// LapsedAt is when the latest takeover ended on its own.
+	LapsedAt *time.Time          `json:"lapsed_at,omitempty"`
+	Replies  []AutomationMessage `json:"replies"`
+	automationoptout.State
 }
 
 // AutomationAccountRequirements reports why an account cannot run DM automation.
@@ -246,7 +262,7 @@ func (s *Service) advanceClaimedReply(ctx context.Context, tx bun.Tx, trigger mo
 			return err
 		}
 		if check.human {
-			return s.stopConversationTx(ctx, tx, conversation, "provider", check.reason)
+			return s.stopConversationTx(ctx, tx, conversation, "provider", check.reason, check.humanAt.Add(automationTakeoverLapse))
 		}
 		return nil
 	}
@@ -374,8 +390,9 @@ func (s *Service) automationLimitReason(ctx context.Context, db bun.IDB, convers
 }
 
 type automationStopResult struct {
-	reason string
-	human  bool
+	reason  string
+	human   bool
+	humanAt time.Time
 }
 
 func (s *Service) automationAccountIssue(ctx context.Context, db bun.IDB, account models.SocialAccount) string {
@@ -422,19 +439,19 @@ func (s *Service) automationStopCheck(ctx context.Context, db bun.IDB, conversat
 	if optedOut {
 		return automationStopResult{reason: stopReasonOptedOut}, nil
 	}
-	stopped, err := db.NewSelect().Model((*automationStop)(nil)).Where("conversation_id = ?", conversation.ID).Exists(ctx)
+	takeover, err := s.activeTakeoverReason(ctx, db, conversation.ID)
 	if err != nil {
 		return automationStopResult{}, err
 	}
-	if stopped {
-		return automationStopResult{reason: stopReasonTakeover}, nil
+	if takeover != "" {
+		return automationStopResult{reason: takeover}, nil
 	}
-	human, err := s.humanRepliedAfter(ctx, db, conversation, account, trigger.RemoteCreatedAt)
+	humanAt, err := s.humanReplyAfter(ctx, db, conversation, account, trigger.RemoteCreatedAt)
 	if err != nil {
 		return automationStopResult{}, err
 	}
-	if human {
-		return automationStopResult{reason: stopReasonHuman, human: true}, nil
+	if !humanAt.IsZero() {
+		return automationStopResult{reason: stopReasonHuman, human: true, humanAt: humanAt}, nil
 	}
 	if conversation.MessagingWindowExpiresAt.IsZero() || !conversation.MessagingWindowExpiresAt.After(s.now()) {
 		return automationStopResult{reason: stopReasonWindow}, nil
@@ -461,56 +478,161 @@ func (s *Service) automationReplyStopCheck(ctx context.Context, db bun.IDB, conv
 	return check, nil
 }
 
-// An outbound provider message that OpenPost automation does not own was written
-// by a person, in Inbox or the Instagram app.
-func (s *Service) humanRepliedAfter(ctx context.Context, db bun.IDB, conversation models.Conversation, account models.SocialAccount, after time.Time) (bool, error) {
-	var outbound []models.DirectMessage
-	if err := db.NewSelect().Model(&outbound).Where("conversation_id = ? AND direction = 'outbound' AND deleted_at IS NULL AND remote_created_at > ?", conversation.ID, after).Scan(ctx); err != nil {
-		return false, err
+func (s *Service) activeTakeoverReason(ctx context.Context, db bun.IDB, conversationID string) (string, error) {
+	var stop automationStop
+	err := db.NewSelect().Model(&stop).Where("conversation_id = ?", conversationID).Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
 	}
-	for _, message := range outbound {
-		owned, err := s.outboundOwnedByAutomation(ctx, db, conversation, account, message)
-		if err != nil {
-			return false, err
-		}
-		if !owned {
-			return true, nil
-		}
+	if err != nil || !stop.active(s.now()) {
+		return "", err
 	}
-	return false, nil
+	return firstNonEmpty(stop.Reason, stopReasonTakeover), nil
 }
 
-// outboundOwnedByAutomation prefers identity. Text alone only identifies an echo
-// that can arrive before its send finalizes: an unconfirmed receipt, close in time.
-// Anything broader would treat a person repeating a phrase as automation.
-func (s *Service) outboundOwnedByAutomation(ctx context.Context, db bun.IDB, conversation models.Conversation, account models.SocialAccount, message models.DirectMessage) (bool, error) {
-	at := automationMessageTime(message)
-	var replies []AutomationMessage
-	if err := db.NewSelect().Model(&replies).Where("conversation_id = ? AND (message_id = ? OR (state = ? AND body = ?))", conversation.ID, message.ID, AutomationSending, message.Body).Scan(ctx); err != nil {
-		return false, err
+// humanReplyAfter returns the time of the latest outbound provider message
+// automation does not own, which a person wrote in Inbox or the Instagram app.
+func (s *Service) humanReplyAfter(ctx context.Context, db bun.IDB, conversation models.Conversation, account models.SocialAccount, after time.Time) (time.Time, error) {
+	var outbound []models.DirectMessage
+	if err := db.NewSelect().Model(&outbound).Where("conversation_id = ? AND direction = 'outbound' AND deleted_at IS NULL AND remote_created_at > ?", conversation.ID, after).Scan(ctx); err != nil {
+		return time.Time{}, err
 	}
-	for _, reply := range replies {
-		if reply.MessageID == message.ID || withinEchoBound(reply.UpdatedAt, at) {
-			return true, nil
+	var latest time.Time
+	for _, message := range outbound {
+		echo, err := s.automationEchoOf(ctx, db, conversation, account, message)
+		if err != nil {
+			return time.Time{}, err
+		}
+		if at := automationMessageTime(message); !echo.owned && at.After(latest) {
+			latest = at
 		}
 	}
-	var private []struct {
+	return latest, nil
+}
+
+type automationEcho struct {
+	owned bool
+	// A text match leaves the receipt to claim, so it cannot own a second message.
+	receiptID, receiptState string
+}
+
+// automationEchoOf prefers identity. Text identifies an echo reported under a
+// different provider ID: the same text as an automated send near its time, once
+// per send. A person repeating a phrase after that echo arrived is a person.
+func (s *Service) automationEchoOf(ctx context.Context, db bun.IDB, conversation models.Conversation, account models.SocialAccount, message models.DirectMessage) (automationEcho, error) {
+	claimed, err := db.NewSelect().Table("message_automation_echoes").Where("conversation_id = ? AND message_id = ?", conversation.ID, message.ID).Exists(ctx)
+	if err != nil || claimed {
+		return automationEcho{owned: claimed}, err
+	}
+	candidates, err := s.messageEchoCandidates(ctx, db, conversation, message)
+	if err != nil {
+		return automationEcho{}, err
+	}
+	private, err := s.privateEchoCandidates(ctx, db, conversation, account, message)
+	if err != nil {
+		return automationEcho{}, err
+	}
+	match := automationEcho{}
+	at := automationMessageTime(message)
+	for _, candidate := range append(candidates, private...) {
+		if candidate.sameID {
+			return automationEcho{owned: true}, nil
+		}
+		if match.owned || candidate.body != message.Body || !withinEchoBound(candidate.updatedAt, at) {
+			continue
+		}
+		taken, err := echoClaimed(ctx, db, candidate.id)
+		if err != nil {
+			return automationEcho{}, err
+		}
+		if !taken {
+			match = automationEcho{owned: true, receiptID: candidate.id, receiptState: candidate.state}
+		}
+	}
+	return match, nil
+}
+
+// echoCandidate is an automated send, a direct message or a private comment reply,
+// that an outbound message could be the echo of.
+type echoCandidate struct {
+	id, body, state string
+	updatedAt       time.Time
+	sameID          bool
+}
+
+func (s *Service) messageEchoCandidates(ctx context.Context, db bun.IDB, conversation models.Conversation, message models.DirectMessage) ([]echoCandidate, error) {
+	var replies []AutomationMessage
+	if err := db.NewSelect().Model(&replies).Where("conversation_id = ? AND (message_id = ? OR (state IN (?) AND body = ?))", conversation.ID, message.ID, bun.List([]string{AutomationSending, AutomationSent, AutomationUncertain}), message.Body).Scan(ctx); err != nil {
+		return nil, err
+	}
+	candidates := make([]echoCandidate, 0, len(replies))
+	for _, reply := range replies {
+		candidates = append(candidates, echoCandidate{id: reply.ID, body: reply.Body, state: reply.State, updatedAt: reply.UpdatedAt, sameID: reply.MessageID == message.ID})
+	}
+	return candidates, nil
+}
+
+func (s *Service) privateEchoCandidates(ctx context.Context, db bun.IDB, conversation models.Conversation, account models.SocialAccount, message models.DirectMessage) ([]echoCandidate, error) {
+	var replies []struct {
+		ID         string    `bun:"id"`
 		Body       string    `bun:"body"`
+		State      string    `bun:"state"`
 		UpdatedAt  time.Time `bun:"updated_at"`
 		ExternalID string    `bun:"external_id"`
 	}
-	if err := db.NewRaw(`SELECT e.body, e.updated_at, COALESCE(p.external_id, '') AS external_id FROM engagement_automation_replies e JOIN engagement_items i ON i.id = e.item_id LEFT JOIN provider_write_attempts p ON e.job_id <> '' AND p.job_id = e.job_id AND p.status = 'accepted' WHERE e.channel = 'private' AND e.state IN ('sending', 'sent') AND i.social_account_id = ? AND i.author_remote_id = ?`, account.ID, conversation.CounterpartRemoteID).Scan(ctx, &private); err != nil {
-		return false, err
+	if err := db.NewRaw(`SELECT e.id, e.body, e.state, e.updated_at, COALESCE(p.external_id, '') AS external_id FROM engagement_automation_replies e JOIN engagement_items i ON i.id = e.item_id LEFT JOIN provider_write_attempts p ON e.job_id <> '' AND p.job_id = e.job_id AND p.status = 'accepted' WHERE e.channel = 'private' AND e.state IN ('sending', 'sent') AND i.social_account_id = ? AND i.author_remote_id = ?`, account.ID, conversation.CounterpartRemoteID).Scan(ctx, &replies); err != nil {
+		return nil, err
 	}
-	for _, reply := range private {
-		if reply.ExternalID != "" && reply.ExternalID == message.RemoteMessageID {
-			return true, nil
-		}
-		if reply.ExternalID == "" && reply.Body == message.Body && withinEchoBound(reply.UpdatedAt, at) {
-			return true, nil
+	candidates := make([]echoCandidate, 0, len(replies))
+	for _, reply := range replies {
+		candidates = append(candidates, echoCandidate{id: reply.ID, body: reply.Body, state: reply.State, updatedAt: reply.UpdatedAt, sameID: reply.ExternalID != "" && reply.ExternalID == message.RemoteMessageID})
+	}
+	return candidates, nil
+}
+
+func echoClaimed(ctx context.Context, db bun.IDB, receiptID string) (bool, error) {
+	return db.NewSelect().Table("message_automation_echoes").Where("receipt_id = ?", receiptID).Exists(ctx)
+}
+
+// claimAutomationEcho spends a send's one text match. The log counts mismatches, so
+// the first live test shows whether Instagram reports different send and echo IDs.
+// An echo that arrives while the send is in progress is ordering until the send
+// reports its ID, and recordAutomationAcceptance decides then.
+func (s *Service) claimAutomationEcho(ctx context.Context, db bun.IDB, conversationID, messageID string, echo automationEcho) error {
+	if _, err := db.NewRaw("INSERT INTO message_automation_echoes(receipt_id,conversation_id,message_id,receipt_state,created_at) VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING", echo.receiptID, conversationID, messageID, echo.receiptState, s.now()).Exec(ctx); err != nil {
+		return err
+	}
+	if echo.receiptState == AutomationSending {
+		return nil
+	}
+	return logEchoMismatch(ctx, db, conversationID, echo.receiptState)
+}
+
+func logEchoMismatch(ctx context.Context, db bun.IDB, conversationID, state string) error {
+	total, err := db.NewSelect().Table("message_automation_echoes").Where("receipt_state NOT IN (?)", bun.List([]string{AutomationSending, echoConfirmed})).Count(ctx)
+	if err != nil {
+		return err
+	}
+	log.Printf("instagram echo id mismatch: conversation=%s receipt_state=%s total=%d", conversationID, state, total)
+	return nil
+}
+
+// echoConfirmed marks a send whose echo arrived under the ID the send reported.
+const echoConfirmed = "confirmed"
+
+// confirmOwnEcho spends the text match when the provider delivers a send's echo
+// under its own ID, so a person who then types the same text is seen as a person.
+func (s *Service) confirmOwnEcho(ctx context.Context, db bun.IDB, conversationID string, remote platform.ProviderMessage) error {
+	var receipts []string
+	if err := db.NewSelect().TableExpr("message_automation_replies AS a").ColumnExpr("a.id").Join("JOIN direct_messages AS d ON d.id = a.message_id").Where("d.conversation_id = ? AND d.remote_message_id = ?", conversationID, remote.ID).Scan(ctx, &receipts); err != nil {
+		return err
+	}
+	for _, receipt := range receipts {
+		if _, err := db.NewRaw("INSERT INTO message_automation_echoes(receipt_id,conversation_id,message_id,receipt_state,created_at) VALUES(?,?,'',?,?) ON CONFLICT DO NOTHING", receipt, conversationID, echoConfirmed, s.now()).Exec(ctx); err != nil {
+			return err
 		}
 	}
-	return false, nil
+	return nil
 }
 
 func withinEchoBound(a, b time.Time) bool {
@@ -547,18 +669,25 @@ func (s *Service) recordProviderOutbound(ctx context.Context, db bun.IDB, accoun
 	if err := tx.NewSelect().Model(&message).Where("conversation_id = ? AND remote_message_id = ?", conversationID, remote.ID).Scan(ctx); err != nil {
 		return err
 	}
-	owned, err := s.outboundOwnedByAutomation(ctx, tx, conversation, account, message)
-	if err != nil || owned {
+	echo, err := s.automationEchoOf(ctx, tx, conversation, account, message)
+	if err != nil {
 		return err
 	}
-	return s.stopConversationTx(ctx, tx, conversation, "provider", stopReasonHuman)
+	if echo.receiptID != "" {
+		return s.claimAutomationEcho(ctx, tx, conversationID, message.ID, echo)
+	}
+	if echo.owned {
+		return nil
+	}
+	return s.stopConversationTx(ctx, tx, conversation, "provider", stopReasonHuman, automationMessageTime(message).Add(automationTakeoverLapse))
 }
 
 // automationSendStopped is the check before a queued automated message reaches
 // the provider. Acceptance is the cancellation boundary; this is the last gate.
 type automationSendStopped struct {
-	reason string
-	human  bool
+	reason  string
+	human   bool
+	humanAt time.Time
 }
 
 func (e *automationSendStopped) Error() string { return e.reason }
@@ -606,7 +735,7 @@ func (s *Service) checkAutomatedSend(ctx context.Context, db bun.IDB, message mo
 		return err
 	}
 	if check.reason != "" {
-		return &automationSendStopped{reason: check.reason, human: check.human}
+		return &automationSendStopped{reason: check.reason, human: check.human, humanAt: check.humanAt}
 	}
 	return nil
 }
@@ -667,14 +796,24 @@ func (s *Service) stopAutomatedMessage(ctx context.Context, message models.Direc
 		if err := organizationguard.LockWorkspace(ctx, tx, message.WorkspaceID); err != nil {
 			return err
 		}
-		if _, err := tx.NewUpdate().Model(&message).Set("send_status = 'failed'").Set("error_message = ?", stopped.reason).Set("updated_at = ?", s.now()).WherePK().Exec(ctx); err != nil {
+		// A write that started and never reported may have reached the provider, so
+		// stopping now cannot claim it did not. The fence never repeats it.
+		unknown, err := tx.NewSelect().Model((*models.ProviderWriteAttempt)(nil)).Where("operation_id = ? AND status IN (?)", "messaging:"+message.ID, bun.List([]string{providerwrite.StatusSending, providerwrite.StatusAmbiguous})).Exists(ctx)
+		if err != nil {
 			return err
 		}
-		if _, err := tx.NewUpdate().Model((*AutomationMessage)(nil)).Set("state = ?, reason = ?, updated_at = ?", AutomationCancelled, stopped.reason, s.now()).Where("message_id = ? AND state <> ?", message.ID, AutomationSent).Exec(ctx); err != nil {
+		status, state, reason := "failed", AutomationCancelled, stopped.reason
+		if unknown {
+			status, state, reason = "ambiguous", AutomationUncertain, stopReasonUncertain
+		}
+		if _, err := tx.NewUpdate().Model(&message).Set("send_status = ?", status).Set("error_message = ?", reason).Set("updated_at = ?", s.now()).WherePK().Exec(ctx); err != nil {
+			return err
+		}
+		if _, err := tx.NewUpdate().Model((*AutomationMessage)(nil)).Set("state = ?, reason = ?, updated_at = ?", state, reason, s.now()).Where("message_id = ? AND state <> ?", message.ID, AutomationSent).Exec(ctx); err != nil {
 			return err
 		}
 		if stopped.human {
-			if err := s.stopConversationTx(ctx, tx, conversation, "provider", stopped.reason); err != nil {
+			if err := s.stopConversationTx(ctx, tx, conversation, "provider", stopped.reason, stopped.humanAt.Add(automationTakeoverLapse)); err != nil {
 				return err
 			}
 		}
@@ -684,26 +823,78 @@ func (s *Service) stopAutomatedMessage(ctx context.Context, message models.Direc
 
 // Provider acceptance is an outcome even when a later action cancelled the run.
 func (s *Service) recordAutomationAcceptance(ctx context.Context, db bun.IDB, messageID string) error {
-	_, err := db.NewUpdate().Model((*AutomationMessage)(nil)).Set("state = ?, reason = '', updated_at = ?", AutomationSent, s.now()).Where("message_id = ?", messageID).Exec(ctx)
-	return err
+	if _, err := db.NewUpdate().Model((*AutomationMessage)(nil)).Set("state = ?, reason = '', updated_at = ?", AutomationSent, s.now()).Where("message_id = ?", messageID).Exec(ctx); err != nil {
+		return err
+	}
+	return s.settleEarlyEcho(ctx, db, messageID)
+}
+
+// An echo claimed before the send reported its ID was merged away if the IDs
+// matched. One that is still there has a different ID.
+func (s *Service) settleEarlyEcho(ctx context.Context, db bun.IDB, messageID string) error {
+	var echo struct {
+		ReceiptID      string `bun:"receipt_id"`
+		ConversationID string `bun:"conversation_id"`
+	}
+	err := db.NewRaw(`SELECT e.receipt_id, e.conversation_id FROM message_automation_echoes e JOIN message_automation_replies a ON a.id = e.receipt_id JOIN direct_messages d ON d.id = e.message_id WHERE a.message_id = ? AND e.receipt_state = ? AND e.message_id <> ?`, messageID, AutomationSending, messageID).Scan(ctx, &echo)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := db.NewRaw("UPDATE message_automation_echoes SET receipt_state = ? WHERE receipt_id = ?", AutomationSent, echo.ReceiptID).Exec(ctx); err != nil {
+		return err
+	}
+	return logEchoMismatch(ctx, db, echo.ConversationID, AutomationSent)
 }
 
 func (s *Service) recordAutomationFailure(ctx context.Context, db bun.IDB, messageID, status, errorMessage string) error {
 	state := AutomationFailed
+	from := []string{AutomationSending, AutomationFailed}
 	if status == "ambiguous" {
-		state = AutomationUncertain
+		// An opt-out can cancel the receipt while this write is in flight, and an
+		// unknown delivery is still the truth about that write.
+		state, from = AutomationUncertain, append(from, AutomationCancelled)
 	}
-	_, err := db.NewUpdate().Model((*AutomationMessage)(nil)).Set("state = ?, reason = ?, updated_at = ?", state, errorMessage, s.now()).Where("message_id = ? AND state IN (?)", messageID, bun.List([]string{AutomationSending, AutomationFailed})).Exec(ctx)
+	_, err := db.NewUpdate().Model((*AutomationMessage)(nil)).Set("state = ?, reason = ?, updated_at = ?", state, errorMessage, s.now()).Where("message_id = ? AND state IN (?)", messageID, bun.List(from)).Exec(ctx)
 	return err
 }
 
-// stopConversationTx records takeover and stops every unsettled reply there.
-func (s *Service) stopConversationTx(ctx context.Context, tx bun.Tx, conversation models.Conversation, stoppedBy, reason string) error {
-	stop := automationStop{ConversationID: conversation.ID, WorkspaceID: conversation.WorkspaceID, StoppedBy: stoppedBy, Reason: reason, StoppedAt: s.now()}
-	if _, err := tx.NewInsert().Model(&stop).On("CONFLICT DO NOTHING").Exec(ctx); err != nil {
+// stopConversationTx records takeover and stops every unsettled reply there. A zero
+// lapse time stays until someone resumes.
+func (s *Service) stopConversationTx(ctx context.Context, tx bun.Tx, conversation models.Conversation, stoppedBy, reason string, lapsesAt time.Time) error {
+	if err := s.recordTakeover(ctx, tx, automationStop{ConversationID: conversation.ID, WorkspaceID: conversation.WorkspaceID, StoppedBy: stoppedBy, Reason: reason, StoppedAt: s.now(), LapsesAt: lapsesAt}); err != nil {
 		return err
 	}
 	return s.cancelConversationRepliesTx(ctx, tx, conversation, reason)
+}
+
+// A takeover that has lapsed is replaced. An active one keeps its start, and the
+// stricter of the two lapse times applies: never lapsing beats lapsing, and a further
+// human message moves the lapse later.
+func (s *Service) recordTakeover(ctx context.Context, tx bun.Tx, stop automationStop) error {
+	result, err := tx.NewInsert().Model(&stop).On("CONFLICT DO NOTHING").Exec(ctx)
+	if err != nil {
+		return err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows > 0 {
+		return err
+	}
+	var current automationStop
+	if err := tx.NewSelect().Model(&current).Where("conversation_id = ?", stop.ConversationID).Scan(ctx); err != nil {
+		return err
+	}
+	switch {
+	case !current.active(s.now()):
+		_, err = tx.NewUpdate().Model(&stop).WherePK().Exec(ctx)
+	case current.LapsesAt.IsZero():
+	case stop.LapsesAt.IsZero():
+		_, err = tx.NewUpdate().Model(&stop).Column("stopped_by", "reason", "lapses_at").WherePK().Exec(ctx)
+	case stop.LapsesAt.After(current.LapsesAt):
+		_, err = tx.NewUpdate().Model(&stop).Column("lapses_at").WherePK().Exec(ctx)
+	}
+	return err
 }
 
 func (s *Service) cancelConversationRepliesTx(ctx context.Context, tx bun.Tx, conversation models.Conversation, reason string) error {
@@ -743,7 +934,8 @@ func (s *Service) StopConversationAutomation(ctx context.Context, actor Actor, w
 		if err := tx.NewSelect().Model(&conversation).Where("id = ? AND workspace_id = ?", conversationID, workspaceID).Scan(ctx); err != nil {
 			return ErrNotFound
 		}
-		return s.stopConversationTx(ctx, tx, conversation, actor.UserID, stopReasonTakeover)
+		// Pressing take over is a decision, so it stays until someone resumes.
+		return s.stopConversationTx(ctx, tx, conversation, actor.UserID, stopReasonTakeover, time.Time{})
 	})
 }
 
@@ -777,16 +969,30 @@ func (s *Service) ConversationAutomationState(ctx context.Context, actor Actor, 
 	if err := s.db.NewSelect().Model(&result.Replies).Where("conversation_id = ?", conversation.ID).Order("created_at DESC", "id DESC").Limit(50).Scan(ctx); err != nil {
 		return result, err
 	}
+	optOut, err := automationoptout.Read(ctx, s.db, conversation.SocialAccountID, conversation.CounterpartRemoteID)
+	if err != nil {
+		return result, err
+	}
+	result.State = optOut
 	var stop automationStop
-	err := s.db.NewSelect().Model(&stop).Where("conversation_id = ?", conversation.ID).Scan(ctx)
+	err = s.db.NewSelect().Model(&stop).Where("conversation_id = ?", conversation.ID).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return result, nil
 	}
 	if err != nil {
 		return result, err
 	}
+	if !stop.active(s.now()) {
+		lapsedAt := stop.LapsesAt
+		result.LapsedAt = &lapsedAt
+		return result, nil
+	}
 	stoppedAt := stop.StoppedAt
 	result.StoppedAt, result.StopReason = &stoppedAt, stop.Reason
+	if !stop.LapsesAt.IsZero() {
+		lapsesAt := stop.LapsesAt
+		result.LapsesAt = &lapsesAt
+	}
 	return result, nil
 }
 
@@ -825,5 +1031,5 @@ func (s *Service) StopWorkflowMessages(ctx context.Context, authority workspacea
 
 // A manual send through Inbox or the API is a person taking over the conversation.
 func (s *Service) stopAutomationForManualSend(ctx context.Context, tx bun.Tx, conversation models.Conversation, actor Actor) error {
-	return s.stopConversationTx(ctx, tx, conversation, actor.UserID, stopReasonTakeover)
+	return s.stopConversationTx(ctx, tx, conversation, actor.UserID, stopReasonTakeover, s.now().Add(automationTakeoverLapse))
 }

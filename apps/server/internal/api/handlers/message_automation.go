@@ -42,6 +42,15 @@ func (h *EngagementMessagingHandler) registerMessageAutomation(api huma.API) {
 		}
 		return h.messageAutomationState(ctx, in)
 	})
+	huma.Register(api, operation("remove-message-automation-opt-out", http.MethodPost, "/messages/{conversation_id}/automation/opt-out/remove", "Remove this person's opt-out from automatic messages and replies"), func(ctx context.Context, in *MessageAutomationInput) (*MessageAutomationOutput, error) {
+		if h.messaging == nil {
+			return nil, huma.Error503ServiceUnavailable("messaging service is unavailable")
+		}
+		if err := h.messaging.RemoveConversationOptOut(ctx, messagingActor(ctx), in.WorkspaceID, in.ConversationID); err != nil {
+			return nil, messagingHTTPError(err, "could not remove the opt-out")
+		}
+		return h.messageAutomationState(ctx, in)
+	})
 }
 
 func (h *EngagementMessagingHandler) messageAutomationState(ctx context.Context, in *MessageAutomationInput) (*MessageAutomationOutput, error) {

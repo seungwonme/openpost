@@ -331,6 +331,10 @@ func (s *Service) storeProviderMessage(ctx context.Context, tx bun.IDB, account 
 		if err := s.recordProviderOutbound(ctx, tx, account, conversationID, remote); err != nil {
 			return false, err
 		}
+	} else if remote.Direction == "outbound" && remote.ID != "" {
+		if err := s.confirmOwnEcho(ctx, tx, conversationID, remote); err != nil {
+			return false, err
+		}
 	}
 	return inserted, nil
 }

@@ -168,11 +168,11 @@ func (s *Service) stopForEarlierHumanReply(ctx context.Context, tx bun.Tx, conve
 	if err := tx.NewSelect().Model(&account).Where("id = ?", conversation.SocialAccountID).Scan(ctx); err != nil {
 		return SequenceProgress{}, err
 	}
-	human, err := s.humanRepliedAfter(ctx, tx, conversation, account, after)
-	if err != nil || !human {
+	humanAt, err := s.humanReplyAfter(ctx, tx, conversation, account, after)
+	if err != nil || humanAt.IsZero() {
 		return SequenceProgress{}, err
 	}
-	if err := s.stopConversationTx(ctx, tx, conversation, "provider", stopReasonHuman); err != nil {
+	if err := s.stopConversationTx(ctx, tx, conversation, "provider", stopReasonHuman, humanAt.Add(automationTakeoverLapse)); err != nil {
 		return SequenceProgress{}, err
 	}
 	return SequenceProgress{State: SequenceStopped, Reason: stopReasonHuman}, nil

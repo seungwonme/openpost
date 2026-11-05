@@ -1,8 +1,11 @@
 package messaging
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
+	"os"
 	"testing"
 	"time"
 
@@ -156,6 +159,7 @@ func TestOwnershipPrefersTheProviderMessageID(t *testing.T) {
 		reply, err := f.s.AdvanceAutomationReply(t.Context(), f.request)
 		require.NoError(t, err)
 		require.NoError(t, f.runSendJob(t, reply.MessageID))
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("sent-remote-id", "Here is the guide", *f.now)))
 		*f.now = f.now.Add(time.Minute)
 		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.typed", "Here is the guide", *f.now)))
 		assert.True(t, f.takenOver(t))
@@ -165,6 +169,7 @@ func TestOwnershipPrefersTheProviderMessageID(t *testing.T) {
 		reply, err := f.s.AdvanceAutomationReply(t.Context(), f.request)
 		require.NoError(t, err)
 		require.NoError(t, f.runSendJob(t, reply.MessageID))
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("sent-remote-id", "Here is the guide", *f.now)))
 		*f.now = f.now.Add(time.Minute)
 		f.receive(t, "later", *f.now)
 		*f.now = f.now.Add(time.Minute)
@@ -205,35 +210,315 @@ func TestOwnershipPrefersTheProviderMessageID(t *testing.T) {
 		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.private", "Your guide", *f.now)))
 		assert.False(t, f.takenOver(t))
 	})
-	t.Run("another provider ID is not that private reply", func(t *testing.T) {
+	t.Run("another provider ID matches a private reply once, near its time", func(t *testing.T) {
 		f := newAutomationFixture(t)
 		f.seedPrivateReply(t, "sent", *f.now)
 		f.seedAttempt(t, "engagement:private", "private-job", "mid.private")
-		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.typed", "Your guide", f.now.Add(time.Minute))))
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.other", "Your guide", f.now.Add(time.Minute))))
+		assert.False(t, f.takenOver(t))
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.typed", "Your guide", f.now.Add(2*time.Minute))))
 		assert.True(t, f.takenOver(t))
 	})
 }
 
-func TestMessageOptOutMatching(t *testing.T) {
-	optOuts := []string{
-		"STOP", "stop", "Stop!", "stop.", "unsubscribe", "stop replying", "STOP ❤️", "stop 🙏", "❤️ stop", "ＳＴＯＰ",
-		"cancel", "don't message me", "stop texting", "거부", "차단", "알림 꺼주세요", "그만 좀", "그만 보내줘", "수신 거부할게요", " Stop. ",
-		"stop please", "please stop", "stop it", "stop now please", "stop messaging me", "stop texting me", "stop sending me messages", "opt out", "optout", "opt me out", "unsub", "unsubscribe me", "do not message me", "don't message me", "remove me", "leave me alone",
-		"그만", "그만!", "그만 해", "그만해", "그만 해요", "그만해요", "그만요", "그만 해주세요", "그만해주세요", "그만해줘", "그만보내", "그만 보내", "그만 보내요", "그만 보내세요", "그만 보내주세요", "이제 그만", "제발 그만해 🙏",
-		"보내지 마세요", "보내지마", "보내지 마", "보내지 말아주세요", "연락하지 마세요",
-		"수신거부", "수신 거부", "수신거부합니다", "수신거부요", "수신 거부 합니다", "수신거절", "구독취소", "구독 취소", "구독취소요", "구독 해지", "스탑", "스톱",
+func TestOptOutTiers(t *testing.T) {
+	tests := map[optOutTier][]string{
+		optOutDefinite: {
+			"STOP", "stop", "Stop!", "stop.", " Stop. ", "unsubscribe", "stop replying", "STOP ❤️", "stop 🙏", "❤️ stop", "ＳＴＯＰ",
+			"stop please", "please stop", "stop it", "stop now please", "stop messaging me", "stop texting", "stop texting me", "stop sending me messages",
+			"opt out", "optout", "opt me out", "unsub", "unsubscribe me", "do not message me", "don't message me", "dont text me", "no more messages", "leave me alone", "remove me",
+			"그만", "그만!", "그만 해", "그만해", "그만 해요", "그만해요", "그만요", "그만 해주세요", "그만해주세요", "그만해줘", "그만보내", "그만 보내", "그만 보내요", "그만 보내줘", "그만 보내세요", "그만 보내주세요", "이제 그만", "제발 그만해 🙏", "그만 좀", "그만 🙏", "메시지 그만 보내주세요",
+			"보내지 마세요", "보내지마", "보내지 마", "보내지 말아주세요", "연락하지 마세요", "메시지 보내지 마세요",
+			"수신거부", "수신 거부", "수신거부합니다", "수신거부요", "수신 거부 합니다", "수신 거부할게요", "수신거절", "구독취소", "구독 취소", "구독취소요", "구독 해지", "스탑", "스톱",
+		},
+		optOutPossible: {
+			"수신거부 어떻게 하나요", "수신 거부 해제해주세요", "구독취소 환불 되나요", "이제 그만 고민할게요", "그만 웃겨요 ㅋㅋㅋ", "how do i unsubscribe", "알림 끄는 법 알려주세요",
+			"이런 메시지는 이제 그만 보내주세요", "can you stop",
+			"stop?", "그만?", "수신거부요?", "unsubscribe?", "could you please stop messaging me", "stop the music", "when do you stop serving lunch", "unsubscribe me from the other list",
+			"cancel", "cancel my order", "거부", "차단", "차단합니다", "알림 꺼주세요",
+			"제 친구가 수신거부를 어떻게 하는지 물어봐서요 혹시 아시나요", "어제 받은 메시지가 너무 좋아서 이제 그만 고민하고 바로 결제하려고 합니다",
+		},
+		optOutNone: {
+			"", "   ", "❤️", "stop by the shop", "don't stop", "can't stop", "non stop", "stop sign", "bus stop", "guide please", "hello",
+			"그만큼 좋아요", "그만두셨나요", "그만한 가격이면 살게요", "가이드 보내주세요", "구독 어떻게 하나요", "안녕하세요", "버스탑승 안내", "거부권이 뭔가요", "차단기 가격",
+		},
 	}
-	for _, body := range optOuts {
-		assert.True(t, messageRequestsOptOut(body), "%q should opt out", body)
+	for tier, bodies := range tests {
+		for _, body := range bodies {
+			assert.Equal(t, tier, classifyOptOut(body), "%q", body)
+		}
 	}
-	people := []string{
-		"", "   ", "❤️", "stop by the shop", "don't stop", "can't stop", "non stop", "stop sign", "stop the music", "cancel my order", "거부권이 뭔가요", "차단기 가격", "bus stop", "when do you stop serving lunch", "guide please", "hello",
-		"그만큼 좋아요", "그만두셨나요", "그만한 가격이면 살게요", "가이드 보내주세요", "구독 어떻게 하나요", "안녕하세요", "버스탑승 안내",
-		"제 친구가 수신거부를 어떻게 하는지 물어봐서요 혹시 아시나요", "어제 받은 메시지가 너무 좋아서 이제 그만 고민하고 바로 결제하려고 합니다",
+}
+
+func TestPossibleOptOutHandsTheConversationToAPerson(t *testing.T) {
+	f := newAutomationFixture(t)
+	reply, err := f.s.AdvanceAutomationReply(t.Context(), f.request)
+	require.NoError(t, err)
+	require.Equal(t, AutomationSending, reply.State)
+	f.seedPrivateReply(t, "sent", f.now.Add(-time.Hour))
+	require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", inboundEvent("mid.ask", "수신거부 어떻게 하나요", *f.now)))
+	assert.False(t, f.optedOut(t), "no permanent opt-out, so comment automation keeps working")
+	assert.True(t, f.takenOver(t))
+	state, err := f.s.ConversationAutomationState(t.Context(), f.actor, "workspace", "conversation")
+	require.NoError(t, err)
+	assert.Equal(t, StopReasonPossibleOptOut, state.StopReason)
+	assert.Nil(t, state.LapsesAt, "a person has to decide, so it does not lapse")
+	require.NoError(t, f.runSendJob(t, reply.MessageID))
+	assert.Zero(t, *f.sends, "nothing further is sent")
+	assert.Equal(t, AutomationCancelled, f.stored(t, reply.MessageID).State)
+
+	require.NoError(t, f.s.ResumeConversationAutomation(t.Context(), f.actor, "workspace", "conversation"))
+	require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", inboundEvent("mid.ask", "수신거부 어떻게 하나요", *f.now)))
+	assert.False(t, f.takenOver(t), "reading the same message again does not undo Resume")
+}
+
+func TestPossibleOptOutInOldHistoryIsNotAHandoff(t *testing.T) {
+	f := newAutomationFixture(t)
+	require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", inboundEvent("mid.old", "수신거부 어떻게 하나요", f.now.Add(-48*time.Hour))))
+	assert.False(t, f.takenOver(t))
+}
+
+func TestOperatorRemovesAnOptOut(t *testing.T) {
+	stop := func(t *testing.T, f automationFixture, id string, at time.Time) {
+		t.Helper()
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", inboundEvent(id, "STOP", at)))
 	}
-	for _, body := range people {
-		assert.False(t, messageRequestsOptOut(body), "%q should not opt out", body)
+	t.Run("records who and when, and a redelivery stays removed", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		stop(t, f, "mid.stop", *f.now)
+		require.True(t, f.optedOut(t))
+		state, err := f.s.ConversationAutomationState(t.Context(), f.actor, "workspace", "conversation")
+		require.NoError(t, err)
+		require.NotNil(t, state.OptedOutAt)
+		*f.now = f.now.Add(time.Hour)
+		require.NoError(t, f.s.RemoveConversationOptOut(t.Context(), f.actor, "workspace", "conversation"))
+		assert.False(t, f.optedOut(t))
+		state, err = f.s.ConversationAutomationState(t.Context(), f.actor, "workspace", "conversation")
+		require.NoError(t, err)
+		assert.Nil(t, state.OptedOutAt)
+		require.NotNil(t, state.RemovedAt)
+		assert.WithinDuration(t, *f.now, *state.RemovedAt, time.Second)
+		assert.NotEmpty(t, state.RemovedByName)
+		var removedBy string
+		require.NoError(t, f.db.NewSelect().Table("automation_optout_removals").Column("removed_by").Scan(t.Context(), &removedBy))
+		assert.Equal(t, f.actor.UserID, removedBy)
+		stop(t, f, "mid.stop", f.now.Add(-time.Hour))
+		assert.False(t, f.optedOut(t), "the provider delivering the old message again changes nothing")
+	})
+	t.Run("a newer refusal opts out again", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		stop(t, f, "mid.stop", *f.now)
+		require.NoError(t, f.s.RemoveConversationOptOut(t.Context(), f.actor, "workspace", "conversation"))
+		*f.now = f.now.Add(time.Minute)
+		stop(t, f, "mid.again", *f.now)
+		assert.True(t, f.optedOut(t))
+	})
+	t.Run("automation can reach them again", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		stop(t, f, "mid.stop", *f.now)
+		require.NoError(t, f.s.RemoveConversationOptOut(t.Context(), f.actor, "workspace", "conversation"))
+		reply, err := f.s.AdvanceAutomationReply(t.Context(), f.request)
+		require.NoError(t, err)
+		assert.Equal(t, AutomationSending, reply.State)
+	})
+	t.Run("requires Edit", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		stop(t, f, "mid.stop", *f.now)
+		_, err := f.db.NewUpdate().Model((*models.WorkspaceMember)(nil)).Set("role = ?", models.WorkspaceRoleViewer).Where("user_id = 'user'").Exec(t.Context())
+		require.NoError(t, err)
+		require.Error(t, f.s.RemoveConversationOptOut(t.Context(), f.actor, "workspace", "conversation"))
+		assert.True(t, f.optedOut(t))
+	})
+}
+
+func TestUnknownWriteThenOptOutIsUncertain(t *testing.T) {
+	f := newAutomationFixture(t)
+	reply, err := f.s.AdvanceAutomationReply(t.Context(), f.request)
+	require.NoError(t, err)
+	f.seedAttempt(t, "messaging:"+reply.MessageID, "job", "")
+	_, err = f.db.NewRaw(`UPDATE provider_write_attempts SET status = 'sending', external_id = ''`).Exec(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", inboundEvent("mid.stop", "STOP", *f.now)))
+	require.NoError(t, f.runSendJob(t, reply.MessageID))
+	assert.Zero(t, *f.sends, "an unknown write is never repeated")
+	assert.Equal(t, "ambiguous", f.message(t, reply.MessageID).SendStatus)
+	stored := f.stored(t, reply.MessageID)
+	assert.Equal(t, AutomationUncertain, stored.State)
+	assert.Equal(t, stopReasonUncertain, stored.Reason)
+}
+
+func TestEchoesOfAutomatedSendsAreNotPeople(t *testing.T) {
+	send := func(t *testing.T, f automationFixture) {
+		t.Helper()
+		reply, err := f.s.AdvanceAutomationReply(t.Context(), f.request)
+		require.NoError(t, err)
+		require.NoError(t, f.runSendJob(t, reply.MessageID))
 	}
+	body := "Here is the guide"
+	t.Run("twenty minutes late under another ID", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		send(t, f)
+		*f.now = f.now.Add(20 * time.Minute)
+		var logs bytes.Buffer
+		log.SetOutput(&logs)
+		t.Cleanup(func() { log.SetOutput(os.Stderr) })
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.other", body, *f.now)))
+		assert.False(t, f.takenOver(t))
+		assert.Contains(t, logs.String(), "instagram echo id mismatch")
+		assert.Contains(t, logs.String(), "total=1")
+	})
+	t.Run("from an uncertain receipt", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		reply, err := f.s.AdvanceAutomationReply(t.Context(), f.request)
+		require.NoError(t, err)
+		_, err = f.db.NewUpdate().Model((*AutomationMessage)(nil)).Set("state = ?", AutomationUncertain).Where("id = ?", reply.ID).Exec(t.Context())
+		require.NoError(t, err)
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.other", body, f.now.Add(time.Minute))))
+		assert.False(t, f.takenOver(t))
+	})
+	t.Run("every send under another ID leaves the conversation running", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		send(t, f)
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.other", body, *f.now)))
+		*f.now = f.now.Add(time.Minute)
+		f.receive(t, "later", *f.now)
+		f.seedRun(t, "later-run", "workflow")
+		next := f.request
+		next.RunID, next.TriggerMessageID = "later-run", "later"
+		reply, err := f.s.AdvanceAutomationReply(t.Context(), next)
+		require.NoError(t, err)
+		assert.Equal(t, AutomationSending, reply.State)
+		assert.False(t, f.takenOver(t))
+	})
+	t.Run("one echo per send, so the same text again is a person", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		send(t, f)
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.other", body, *f.now)))
+		require.False(t, f.takenOver(t))
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.typed", body, f.now.Add(time.Minute))))
+		assert.True(t, f.takenOver(t))
+	})
+	t.Run("the same text after an hour is a person", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		send(t, f)
+		*f.now = f.now.Add(61 * time.Minute)
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.typed", body, *f.now)))
+		assert.True(t, f.takenOver(t))
+	})
+	t.Run("an echo before the send reports its ID is logged once it does", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		reply, err := f.s.AdvanceAutomationReply(t.Context(), f.request)
+		require.NoError(t, err)
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.early", body, *f.now)))
+		var logs bytes.Buffer
+		log.SetOutput(&logs)
+		t.Cleanup(func() { log.SetOutput(os.Stderr) })
+		require.NoError(t, f.runSendJob(t, reply.MessageID))
+		assert.False(t, f.takenOver(t))
+		assert.Contains(t, logs.String(), "instagram echo id mismatch")
+	})
+	t.Run("the same ID proves the IDs match, so no message is matched by text", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		send(t, f)
+		var logs bytes.Buffer
+		log.SetOutput(&logs)
+		t.Cleanup(func() { log.SetOutput(os.Stderr) })
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("sent-remote-id", body, *f.now)))
+		assert.False(t, f.takenOver(t))
+		assert.NotContains(t, logs.String(), "instagram echo id mismatch")
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.typed", body, f.now.Add(time.Minute))))
+		assert.True(t, f.takenOver(t))
+	})
+}
+
+func TestTakeoverLapses(t *testing.T) {
+	day := 24 * time.Hour
+	state := func(t *testing.T, f automationFixture) ConversationAutomation {
+		t.Helper()
+		result, err := f.s.ConversationAutomationState(t.Context(), f.actor, "workspace", "conversation")
+		require.NoError(t, err)
+		return result
+	}
+	t.Run("seven days after a person's last message", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		at := *f.now
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.human", "Hi", at)))
+		current := state(t, f)
+		require.NotNil(t, current.LapsesAt)
+		assert.WithinDuration(t, at.Add(7*day), *current.LapsesAt, time.Second)
+
+		*f.now = at.Add(3 * day)
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.again", "Still me", *f.now)))
+		assert.WithinDuration(t, at.Add(10*day), *state(t, f).LapsesAt, time.Second, "a further message moves it")
+
+		*f.now = at.Add(9 * day)
+		assert.NotNil(t, state(t, f).StoppedAt)
+		*f.now = at.Add(10*day + time.Minute)
+		current = state(t, f)
+		assert.Nil(t, current.StoppedAt)
+		require.NotNil(t, current.LapsedAt, "Inbox shows that it ended")
+	})
+	t.Run("a lapsed takeover lets automation answer", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.human", "Hi", f.now.Add(-time.Minute))))
+		*f.now = f.now.Add(8 * day)
+		f.receive(t, "later", *f.now)
+		_, err := f.db.NewUpdate().Model((*models.Conversation)(nil)).Set("messaging_window_expires_at = ?", f.now.Add(day)).Where("id = 'conversation'").Exec(t.Context())
+		require.NoError(t, err)
+		next := f.request
+		next.TriggerMessageID = "later"
+		reply, err := f.s.AdvanceAutomationReply(t.Context(), next)
+		require.NoError(t, err)
+		assert.Equal(t, AutomationSending, reply.State)
+	})
+	t.Run("a new message after it lapsed starts again", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.human", "Hi", *f.now)))
+		*f.now = f.now.Add(8 * day)
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.again", "Back", *f.now)))
+		assert.WithinDuration(t, f.now.Add(7*day), *state(t, f).LapsesAt, time.Second)
+	})
+	t.Run("a manual send lapses", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		_, err := f.s.QueueMessage(t.Context(), f.actor, "conversation", "From Inbox")
+		require.NoError(t, err)
+		require.NotNil(t, state(t, f).LapsesAt)
+	})
+	t.Run("pressing take over stays, and it outranks an inferred one", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.human", "Hi", *f.now)))
+		require.NoError(t, f.s.StopConversationAutomation(t.Context(), f.actor, "workspace", "conversation"))
+		assert.Nil(t, state(t, f).LapsesAt)
+		require.NoError(t, f.s.ApplyProviderEvents(t.Context(), "account", outboundEvent("mid.again", "Hi again", f.now.Add(time.Minute))))
+		assert.Nil(t, state(t, f).LapsesAt)
+		*f.now = f.now.Add(30 * day)
+		assert.NotNil(t, state(t, f).StoppedAt)
+	})
+}
+
+func TestEveryRefreshFailureHoldsTheSend(t *testing.T) {
+	f := newAutomationFixture(t)
+	reply, err := f.s.AdvanceAutomationReply(t.Context(), f.request)
+	require.NoError(t, err)
+	valid := f.s.tokens
+	f.s.tokens = failingToken{}
+	require.NoError(t, f.runSendJob(t, reply.MessageID))
+	assert.Zero(t, *f.sends, "no token means no read, and no read means no send")
+	assert.Equal(t, "queued", f.message(t, reply.MessageID).SendStatus)
+	queued, err := f.db.NewSelect().Model((*models.Job)(nil)).Where("payload LIKE ?", "%retry_at%").Count(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, 1, queued)
+
+	f.s.tokens = valid
+	require.NoError(t, f.runSendJob(t, reply.MessageID))
+	assert.Equal(t, 1, *f.sends)
+	assert.Equal(t, 1, *f.refreshes)
+}
+
+type failingToken struct{}
+
+func (failingToken) GetValidAccessToken(context.Context, string) (string, error) {
+	return "", errors.New("token store unavailable")
 }
 
 func TestOptOutIsRecordedOnEveryIngestPath(t *testing.T) {

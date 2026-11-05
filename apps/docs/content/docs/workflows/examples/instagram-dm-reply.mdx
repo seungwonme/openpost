@@ -48,20 +48,35 @@ A delay of 24 hours or more before a reply step fails when you publish, because 
 
 ### Opting out
 
-A short message asking to stop opts that person out of automatic messages from the account, and the opt-out also covers its comment automation. A message that opts out never starts a workflow. Capitalization, spacing, punctuation, and emoji are ignored.
+OpenPost sorts a message that mentions stopping into two groups. Capitalization, spacing, punctuation and emoji are ignored.
 
-| Language | Recognized                                                                                                                                                                                                                                                                                                                                                                         |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| English  | `stop` or `cancel`, alone or with `please`, `now`, `it` and similar words, and either followed by `replying`, `messaging`, `texting`, `sending`, `contacting` or `dm`, such as `stop messaging me`. Any message of up to six words containing `unsubscribe`, `unsub`, `opt out`, `remove me`, `leave me alone`, `no more messages`, or `do not message`, `text` or `contact`.      |
-| Korean   | Any message of up to 12 characters, not counting spaces, containing `그만`, such as `그만해요`, `그만 보내` or `이제 그만`. Words like `그만큼` and `그만두` do not count. Any message of up to 16 characters containing `수신거부`, `수신거절`, `수신취소`, `구독취소`, `구독해지`, `구독해제`, `보내지 마`, `연락하지 마` or `알림 꺼`. `스탑`, `스톱`, `거부` and `차단` alone. |
+**A definite refusal** has nothing else in it. It opts that person out of automatic messages from the account, and it also covers that account's comment automation. It stays until someone removes it, and pending messages are cancelled.
 
-Matching leans toward opting out, because a false match only silences automation for that person. `stop by the shop` and `don't stop` are not opt-outs.
+| Language | Definite refusals                                                                                                                                                                                                                               |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| English  | `stop`, with `please`, `now`, `it` and similar words, or followed by what to stop, such as `stop messaging me`. `unsubscribe`, `unsub`, `opt out`, `remove me`, `leave me alone`, `no more messages`, `do not message me` and `do not text me`. |
+| Korean   | `그만`, `그만해요`, `그만 해주세요`, `그만 보내주세요`, `보내지 마세요`, `연락하지 마세요`, `수신거부`, `수신거부합니다`, `구독취소`, `구독해지`, `스탑` and `스톱`, with or without spaces, and with `제발`, `이제` or `좀`.                   |
+
+**A possible request** has the same words with other content, a question or a negation. `수신거부 어떻게 하나요`, `이제 그만 고민할게요`, `how do i unsubscribe`, `can you stop` and `stop?` are examples, and so are `cancel`, `거부`, `차단` and `알림 꺼주세요` on their own, because they do not say what to stop. OpenPost records no opt-out, sends nothing further in that conversation, and hands it to a person with the reason on the conversation. Someone then reads the message and chooses **Resume automation** or leaves it stopped. This does not end by itself, and it does not affect comment automation.
+
+`stop by the shop`, `don't stop`, `can't stop`, `bus stop` and words like `그만큼` and `그만두` are neither.
+
+A message in either group never starts a workflow. Automation does not read meaning, so a person checks every message in the second group.
+
+To remove an opt-out, open the conversation or the person's comment in Inbox and choose **Remove opt-out**. This needs Edit permission. It applies to that person on the account for both comments and direct messages, and OpenPost records who removed it and when. It starts nothing by itself, stopped runs stay stopped, and a new refusal from the person opts them out again.
+
+### Taking over
+
+A person replying in Inbox or the Instagram app takes over the conversation. Automation stops there, and active runs are cancelled. This takeover ends seven days after that person's last message, and Inbox shows the date. Choosing **Take over** or **Resume automation** yourself is a decision that does not expire: a takeover you pressed lasts until someone resumes it.
+
+A message the account sent more than 24 hours ago does not start a takeover. Instagram can report OpenPost's own send under another ID. OpenPost treats a message with the same text within an hour of a send as that send's echo, once per send, so a person who repeats the exact text of an automated message within that hour may not be detected the first time.
 
 ### Limits
 
 - A conversation receives at most five automatic messages an hour and 20 in 24 hours, across all workflows and comment campaigns. This also stops two connected accounts from answering each other indefinitely.
-- One person starts at most five runs of a workflow a day, so they cannot use up its daily run limit.
-- Runs that failed, were stopped, or were skipped do not count toward the daily run limit. Messages in a conversation someone took over never start a run.
+- One person starts at most five runs of a workflow a day, whatever those runs went on to do, so they cannot use up its daily run limit or keep paid AI steps running. A later message appears as a stopped run that says why.
+- Runs that failed, were stopped, or were skipped do not count toward the daily run limit, unless the workflow has an AI step, which costs money either way. When the limit is reached the workflow shows it, and later messages wait until the next day.
+- Messages in a conversation someone took over never start a run.
 
 Failed and unconfirmed sends remain inspectable. OpenPost does not repeat a send when the outcome is uncertain. One message gets at most one automatic reply, even if Meta delivers its webhook twice.
 
@@ -76,6 +91,6 @@ The first delay counts from the person's response. Later delays count from the p
 
 A conversation runs one automated sequence at a time, across all workflows. If someone sends another message while a sequence is running, or a second campaign reaches the same message, that later run sends nothing, finishes normally and shows why. Every message in a sequence counts toward the limits below, so a person who has just received other automated messages can get fewer of them, and the run stops and shows why.
 
-OpenPost repeats the checks above before each message and also stops if someone takes over the comment. When a check fails, or a message fails or has an unconfirmed outcome, the sequence stops, nothing further is sent, and the run shows the reason. With review delivery, each message waits for its own approval when it is due. If approval comes too late, the message is not sent.
+OpenPost repeats the checks above before each message and also stops if someone takes over the comment. When a check fails, or a message fails or has an unconfirmed outcome, the sequence stops, nothing further is sent, and the run shows the reason. With review delivery, each message waits for its own approval when it is due. If the window closes while a message waits for approval, or 24 hours pass since the response, the approval ends, the run shows why, and the next message from that person can start a sequence.
 
 See [Meta's messaging documentation](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api) for provider requirements. This workflow does not include follower gates, email capture or broadcasts.

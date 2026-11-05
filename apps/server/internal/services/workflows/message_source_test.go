@@ -423,9 +423,16 @@ func TestOneSenderCannotExhaustAWorkflowsDailyLimit(t *testing.T) {
 	}
 	f.message(t, models.DirectMessage{ID: "other", ConversationID: "c-other", AuthorRemoteID: "another-reader", Body: "hi", CreatedAt: time.Now().UTC().Add(time.Hour)})
 	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
-	sources := f.runSources(t, workflow.ID)
-	assert.Len(t, sources, maxMessageRunsPerSender+1)
-	assert.Contains(t, sources, "other")
+	runs, err := f.s.Runs(t.Context(), f.actor, "ws", workflow.ID)
+	require.NoError(t, err)
+	started := 0
+	for _, run := range runs {
+		if run.State != StateCancelled {
+			started++
+		}
+	}
+	assert.Equal(t, maxMessageRunsPerSender+1, started)
+	assert.Contains(t, f.runSources(t, workflow.ID), "other")
 }
 
 func TestTakenOverConversationStartsNoRunEvenAfterResume(t *testing.T) {
@@ -559,6 +566,149 @@ func TestMessageFirstStoredFromHistoryNeverStartsARun(t *testing.T) {
 			f.message(t, models.DirectMessage{ID: "live", AuthorRemoteID: "reader", Body: "guide"})
 			require.NoError(t, f.s.poll(t.Context(), workflow.ID))
 			assert.Equal(t, []string{"live"}, f.runSources(t, workflow.ID))
+		})
+	}
+}
+
+func TestSenderOverTheLimitIsVisibleAndStartsNoStep(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newMessageSourceFixture(t, backend)
+			source := messageSource("GUIDE")
+			source.DailyLimit = 100
+			workflow := f.publish(t, source, nil)
+			for i := range maxMessageRunsPerSender + 1 {
+				f.message(t, models.DirectMessage{ID: fmt.Sprintf("m%d", i), AuthorRemoteID: "reader", Body: "guide"})
+			}
+			require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+			runs, err := f.s.Runs(t.Context(), f.actor, "ws", workflow.ID)
+			require.NoError(t, err)
+			require.Len(t, runs, maxMessageRunsPerSender+1, "no message disappears")
+			limited := 0
+			for _, run := range runs {
+				if run.Error == stopReasonSenderLimit {
+					limited++
+					assert.Equal(t, StateCancelled, run.State)
+				}
+			}
+			assert.Equal(t, 1, limited)
+		})
+	}
+}
+
+func TestSenderLimitCountsRunsThatSpentAndThenSkipped(t *testing.T) {
+	f := newMessageSourceFixture(t, "sqlite")
+	source := messageSource("GUIDE")
+	source.DailyLimit = 100
+	workflow := f.publish(t, source, nil)
+	for i := range maxMessageRunsPerSender + 1 {
+		f.message(t, models.DirectMessage{ID: fmt.Sprintf("m%d", i), AuthorRemoteID: "reader", Body: "guide"})
+		require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+		_, err := f.s.db.NewRaw(`UPDATE workflow_runs SET state = 'succeeded', results_json = '[{"status":"skipped"}]' WHERE state = 'queued'`).Exec(t.Context())
+		require.NoError(t, err)
+	}
+	reached, err := messageSenderLimitReached(t.Context(), f.s.db, workflowRecord{ID: workflow.ID}, "c-reader", time.Now().UTC())
+	require.NoError(t, err)
+	assert.True(t, reached)
+}
+
+func TestDailyLimitCountsSkippedRunsWhenAStepCosts(t *testing.T) {
+	ai := Step{ID: "think", Kind: KindAIText}
+	assert.True(t, paidSteps([]Step{{ID: "branch", Kind: KindCondition, Then: []Step{ai}}}))
+	assert.False(t, paidSteps([]Step{{ID: "reply", Kind: KindMessageReply}, {ID: "wait", Kind: KindWait}}))
+	f := newMessageSourceFixture(t, "sqlite")
+	source := messageSource("GUIDE")
+	source.DailyLimit = 2
+	workflow := f.publish(t, source, nil)
+	record := workflowRecord{ID: workflow.ID}
+	f.message(t, models.DirectMessage{ID: "m1", AuthorRemoteID: "reader", Body: "guide"})
+	f.message(t, models.DirectMessage{ID: "m2", AuthorRemoteID: "reader", Body: "guide"})
+	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+	_, err := f.s.db.NewRaw(`UPDATE workflow_runs SET results_json = '[{"status":"skipped"}]'`).Exec(t.Context())
+	require.NoError(t, err)
+	free, err := commentDailyLimitReached(t.Context(), f.s.db, record, Definition{Source: source, Steps: []Step{{ID: "reply", Kind: KindMessageReply}}}, time.Now().UTC())
+	require.NoError(t, err)
+	assert.False(t, free)
+	paid, err := commentDailyLimitReached(t.Context(), f.s.db, record, Definition{Source: source, Steps: []Step{ai}}, time.Now().UTC())
+	require.NoError(t, err)
+	assert.True(t, paid)
+}
+
+func TestDailyLimitIsVisibleOnTheWorkflow(t *testing.T) {
+	f := newMessageSourceFixture(t, "sqlite")
+	source := messageSource("GUIDE")
+	source.DailyLimit = 1
+	workflow := f.publish(t, source, nil)
+	f.message(t, models.DirectMessage{ID: "m1", AuthorRemoteID: "reader", Body: "guide"})
+	f.message(t, models.DirectMessage{ID: "m2", AuthorRemoteID: "other", Body: "guide"})
+	require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+	var note string
+	require.NoError(t, f.s.db.NewSelect().Model((*workflowRecord)(nil)).Column("source_error").Where("id = ?", workflow.ID).Scan(t.Context(), &note))
+	assert.Equal(t, messageDailyLimitNote, note)
+}
+
+func TestLapsedTakeoverNoLongerHoldsAMessage(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newMessageSourceFixture(t, backend)
+			workflow := f.publish(t, messageSource("GUIDE"), nil)
+			_, err := f.s.db.NewRaw(`INSERT INTO message_automation_stops(conversation_id,workspace_id,stopped_by,reason,stopped_at,lapses_at) VALUES('c-reader','ws','provider','x',?,?)`, f.now.Add(-8*24*time.Hour), f.now.Add(-time.Hour)).Exec(t.Context())
+			require.NoError(t, err)
+			f.message(t, models.DirectMessage{ID: "after", AuthorRemoteID: "reader", Body: "guide"})
+			require.NoError(t, f.s.poll(t.Context(), workflow.ID))
+			assert.Equal(t, []string{"after"}, f.runSources(t, workflow.ID))
+		})
+	}
+}
+
+func (f *messageSourceFixture) parkedReview(t *testing.T, workflowID string, sequenceLength int, triggerAt time.Time) {
+	t.Helper()
+	f.message(t, models.DirectMessage{ID: "trigger", AuthorRemoteID: "reader", Body: "guide", RemoteCreatedAt: triggerAt})
+	_, err := f.s.db.NewRaw(`INSERT INTO workflow_runs(id,workflow_id,workspace_id,workflow_name,workflow_revision,mode,state,revision,definition_json,authority_json,source_json,remaining_json,results_json,created_at,updated_at) VALUES('review',?,'ws','DM',1,'live','awaiting_approval',1,'{}','{}','{}','[]','[]',?,?)`, workflowID, f.now, f.now).Exec(t.Context())
+	require.NoError(t, err)
+	_, err = f.s.db.NewRaw(`INSERT INTO message_automation_replies(id,workspace_id,conversation_id,trigger_message_id,workflow_id,run_id,step_id,user_id,body,state,reason,message_id,sequence_position,sequence_length,comment_item_id,created_at,updated_at) VALUES('receipt','ws','c-reader','trigger',?,'review','send','user','Hi','awaiting_review','','',0,?,'',?,?)`, workflowID, sequenceLength, f.now, f.now).Exec(t.Context())
+	require.NoError(t, err)
+}
+
+func (f *messageSourceFixture) reviewOutcome(t *testing.T) (runState, runError, receiptState, receiptReason string) {
+	t.Helper()
+	require.NoError(t, f.s.db.NewRaw(`SELECT r.state, r.error, a.state, a.reason FROM workflow_runs r JOIN message_automation_replies a ON a.run_id = r.id WHERE r.id = 'review'`).Scan(t.Context(), &runState, &runError, &receiptState, &receiptReason))
+	return runState, runError, receiptState, receiptReason
+}
+
+func TestLateMessageApprovalEndsWithItsReason(t *testing.T) {
+	day := 24 * time.Hour
+	tests := map[string]struct {
+		sequenceLength int
+		triggerAge     time.Duration
+		windowLeft     time.Duration
+		ended          bool
+	}{
+		"open window":                         {sequenceLength: 2, triggerAge: time.Hour, windowLeft: time.Hour},
+		"closed window":                       {sequenceLength: 2, triggerAge: time.Hour, windowLeft: -time.Minute, ended: true},
+		"closed window on a plain reply":      {triggerAge: time.Hour, windowLeft: -time.Minute, ended: true},
+		"a later message extends a plain one": {triggerAge: 2 * day, windowLeft: time.Hour},
+		"but not a sequence":                  {sequenceLength: 2, triggerAge: 2 * day, windowLeft: time.Hour, ended: true},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			eachMessageBackend(t, func(t *testing.T, f *messageSourceFixture) {
+				workflow := f.publish(t, messageSource(), nil)
+				f.parkedReview(t, workflow.ID, test.sequenceLength, f.now.Add(-test.triggerAge))
+				_, err := f.s.db.NewUpdate().Model((*models.Conversation)(nil)).Set("messaging_window_expires_at = ?", f.now.Add(test.windowLeft)).Where("id = 'c-reader'").Exec(t.Context())
+				require.NoError(t, err)
+				require.NoError(t, f.s.endLateMessageApprovals(t.Context(), f.now))
+				runState, runError, receiptState, receiptReason := f.reviewOutcome(t)
+				if !test.ended {
+					assert.Equal(t, StateApproval, runState)
+					assert.Equal(t, "awaiting_review", receiptState)
+					return
+				}
+				assert.Equal(t, StateCancelled, runState)
+				assert.Equal(t, stopReasonApprovalLate, runError)
+				assert.Equal(t, "cancelled", receiptState)
+				assert.Equal(t, stopReasonApprovalLate, receiptReason)
+			})
 		})
 	}
 }

@@ -2,12 +2,17 @@ package workflows
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/openpost/backend/internal/services/inboxchanges"
+	"github.com/openpost/backend/internal/services/organizationguard"
 	"github.com/uptrace/bun"
 )
 
@@ -51,6 +56,62 @@ func (s *Service) wakeRespondedRuns(ctx context.Context, now time.Time) error {
 	}
 	_, err = s.db.NewRaw(`DELETE FROM message_sequence_waits WHERE run_id IN (SELECT id FROM workflow_runs WHERE state NOT IN (?))`, bun.List([]string{StateQueued, StateRunning, StateWaiting, StateApproval})).Exec(ctx)
 	return err
+}
+
+// An approval that can no longer produce a message would otherwise wait for the run
+// lifetime and, for a sequence, hold the one active sequence the person can have.
+const stopReasonApprovalLate = "The Instagram messaging window closed before this message was approved, so it was not sent."
+
+type lateMessageApproval struct {
+	ReceiptID      string `bun:"receipt_id"`
+	RunID          string `bun:"run_id"`
+	WorkspaceID    string `bun:"workspace_id"`
+	ConversationID string `bun:"conversation_id"`
+}
+
+// endLateMessageApprovals is one read from the workflow sweep. The conversation's
+// window closed, or a sequence's 24 hours from the response passed, which a later
+// message does not extend.
+func (s *Service) endLateMessageApprovals(ctx context.Context, now time.Time) error {
+	var late []lateMessageApproval
+	if err := s.db.NewRaw(`SELECT a.id AS receipt_id, a.run_id, a.workspace_id, a.conversation_id FROM message_automation_replies a
+		JOIN workflow_runs r ON r.id = a.run_id
+		JOIN conversations c ON c.id = a.conversation_id
+		JOIN direct_messages d ON d.id = a.trigger_message_id
+		WHERE a.state = 'awaiting_review' AND r.state = ?
+		AND (c.messaging_window_expires_at IS NULL OR c.messaging_window_expires_at <= ? OR (a.sequence_length > 0 AND d.remote_created_at <= ?))
+		LIMIT 100`, StateApproval, now, now.Add(-messageWindowMinutes*time.Minute)).Scan(ctx, &late); err != nil {
+		return err
+	}
+	for _, approval := range late {
+		if err := s.endLateMessageApproval(ctx, approval, now); err != nil {
+			// One run that cannot be ended must not hold up the rest of the batch.
+			log.Printf("Failed to end late message approval %s: %v", approval.RunID, err)
+		}
+	}
+	return nil
+}
+
+func (s *Service) endLateMessageApproval(ctx context.Context, approval lateMessageApproval, now time.Time) error {
+	return s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if err := organizationguard.LockWorkspace(ctx, tx, approval.WorkspaceID); err != nil {
+			return err
+		}
+		var run runRecord
+		if err := tx.NewSelect().Model(&run).Where("id = ? AND state = ?", approval.RunID, StateApproval).Scan(ctx); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			return err
+		}
+		if _, err := tx.NewRaw(`UPDATE message_automation_replies SET state = 'cancelled', reason = ?, updated_at = ? WHERE id = ? AND state = 'awaiting_review'`, stopReasonApprovalLate, now, approval.ReceiptID).Exec(ctx); err != nil {
+			return err
+		}
+		if err := s.cancelMessageRun(ctx, tx, run, stopReasonApprovalLate); err != nil {
+			return err
+		}
+		return inboxchanges.Append(ctx, tx, approval.WorkspaceID, inboxchanges.Change{Kind: "conversation", ConversationID: approval.ConversationID})
+	})
 }
 
 // A sequence reads each position's text from its receipt, so one review must not
