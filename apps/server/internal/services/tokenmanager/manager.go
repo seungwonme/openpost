@@ -131,6 +131,16 @@ func (tm *TokenManager) ForceRefreshGrant(ctx context.Context, grantID string) (
 	if err := activeCredentialError(&account, &grant); err != nil {
 		return "", err
 	}
+	// A grant whose provider has no refresh flow stays usable until it expires,
+	// then readiness and API errors ask for a reconnect. The durable job has
+	// nothing to do, and repeating it would only retry a call that cannot work.
+	provider, err := tm.providerForAccount(&account)
+	if err != nil {
+		return "", err
+	}
+	if !provider.RefreshCapability().Supported {
+		return "", fmt.Errorf("%w: provider has no refresh flow for grant %s", errObsoleteRefreshTarget, grant.ID)
+	}
 	return tm.forceRefreshGrant(ctx, &account, &grant)
 }
 
