@@ -11,8 +11,11 @@ const (
 	ConnectionModeBot            = "bot"
 	ConnectionModeOAuth          = "oauth"
 	ConnectionModeInstagramLogin = "instagram_login"
-	ConnectionModeOAuthOOB       = "oauth_oob"
-	ConnectionModeWebhook        = "webhook"
+	// ConnectionModeUnifiedLogin is an account connection type only. A Unified
+	// Login provider app stays an oauth entry with a config_id.
+	ConnectionModeUnifiedLogin = "unified_login"
+	ConnectionModeOAuthOOB     = "oauth_oob"
+	ConnectionModeWebhook      = "webhook"
 )
 
 // ProviderAppContract defines the instance-owned application fields required

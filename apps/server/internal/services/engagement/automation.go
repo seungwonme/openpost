@@ -130,11 +130,11 @@ func (s *Service) privateReplyEligibility(item models.EngagementItem, account mo
 	if len(strings.TrimSpace(body)) > 1000 {
 		return errors.New("private Instagram replies support up to 1000 bytes")
 	}
-	scope := "instagram_manage_comments"
-	if strings.Contains(engagementProviderKey(account), "instagram_login") {
-		scope = "instagram_business_manage_comments"
-	}
-	if len(platform.MissingAnalyticsScopes(account.GrantedScopes, []string{scope})) > 0 {
+	key := engagementProviderKey(account)
+	if len(platform.MissingAnalyticsScopes(account.GrantedScopes, platform.InstagramPrivateReplyScopes(key))) > 0 {
+		if key == platform.InstagramUnifiedProviderKey {
+			return errors.New("reconnect Instagram with comment and message permissions before sending private replies")
+		}
 		return errors.New("reconnect Instagram with comment permissions before sending private replies")
 	}
 	return nil

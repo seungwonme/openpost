@@ -2064,6 +2064,8 @@
 	"accounts_oauth_account_selection_failed": "O OpenPost não conseguiu listar as contas disponíveis. Verifica as permissões do fornecedor e o acesso às contas e volta a ligar.",
 	"accounts_oauth_account_save_failed": "O OpenPost não conseguiu guardar a ligação. Verifica o acesso ao espaço de trabalho e os limites do plano e volta a ligar.",
 	"accounts_oauth_facebook_no_pages": "O Facebook não partilhou nenhuma Página que possas gerir. Cria uma Página, pede acesso a uma ou verifica as permissões da app e tenta novamente.",
+	"accounts_oauth_instagram_configuration_no_account": "O Instagram não encontrou nenhuma conta para esta ligação. A conta não está associada a uma Página do Facebook que possa gerir, ou a sua configuração da Meta emite um token de utilizador em vez de um token de utilizador do sistema. Verifique o tipo de token da configuração no painel da Meta e volte a ligar.",
+	"accounts_oauth_instagram_no_assigned_account": "O Instagram não encontrou nenhuma conta profissional partilhada com esta app. Inicie sessão novamente, escolha o portefólio empresarial proprietário da conta e partilhe a conta do Instagram.",
 	"accounts_oauth_instagram_no_page_linked_account": "O Instagram precisa de uma conta Business ou Creator ligada a uma Página do Facebook que possas gerir. Liga a conta a uma Página, verifica o teu acesso e tenta novamente.",
 	"accounts_oauth_confirm_title": "Ligar {platform}",
 	"accounts_oauth_confirm_description": "Eis o que acontecerá a seguir.",

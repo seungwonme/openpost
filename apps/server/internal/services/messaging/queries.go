@@ -9,6 +9,7 @@ import (
 
 	"github.com/openpost/backend/internal/models"
 	"github.com/openpost/backend/internal/services/inboxchanges"
+	"github.com/openpost/backend/internal/services/instagramwebhook"
 	"github.com/openpost/backend/internal/services/organizationguard"
 	"github.com/openpost/backend/internal/services/workspaceaccess"
 	"github.com/uptrace/bun"
@@ -170,7 +171,15 @@ func (s *Service) ListSyncStates(ctx context.Context, actor Actor, workspaceID s
 	if err := s.authorize(ctx, workspaceID, actor, workspaceaccess.LevelRead); err != nil {
 		return nil, err
 	}
-	return s.states.list(ctx, workspaceID)
+	states, err := s.states.list(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	webhooks, err := instagramwebhook.MessagingStates(ctx, s.db, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return append(states, webhooks...), nil
 }
 
 func (s *Service) SetConversationState(ctx context.Context, actor Actor, workspaceID, conversationID string, read, archived *bool) error {

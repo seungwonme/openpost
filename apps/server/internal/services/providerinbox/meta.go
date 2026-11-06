@@ -177,7 +177,7 @@ func (s *Service) metaEntryReceipts(ctx context.Context, app MetaApp, object str
 	var rows []receipt
 	for _, account := range accounts {
 		for _, payload := range payloads {
-			if payload.kind == "message" && len(platform.MissingAnalyticsScopes(account.GrantedScopes, app.messagingScopes())) > 0 {
+			if payload.kind == "message" && len(platform.MissingAnalyticsScopes(account.GrantedScopes, app.messagingScopes(account))) > 0 {
 				continue
 			}
 			encoded, err := json.Marshal(payload.event)
@@ -194,9 +194,12 @@ func (s *Service) metaEntryReceipts(ctx context.Context, app MetaApp, object str
 	return rows, nil
 }
 
-func (app MetaApp) messagingScopes() []string {
+func (app MetaApp) messagingScopes(account models.SocialAccount) []string {
 	if app.Platform == "facebook" {
 		return []string{"pages_messaging", "pages_manage_metadata"}
+	}
+	if platform.AccountProviderKey(account.Platform, account.InstanceURL, account.CapabilityState) == platform.InstagramUnifiedProviderKey {
+		return platform.InstagramUnifiedMessagingScopes()
 	}
 	if app.ConnectionMode == "instagram_login" {
 		return []string{"instagram_business_basic", "instagram_business_manage_messages"}

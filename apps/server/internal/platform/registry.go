@@ -206,6 +206,21 @@ func BuildAdapterRegistry(apps []AppConfig, opts RegistryOptions) (map[string]Ad
 				Adapter:        adapter,
 			})
 		}
+		if app.Provider == providerInstagram && app.ConnectionMode == ConnectionModeOAuth {
+			// A system user token cannot be told apart until the code exchange,
+			// and the account keeps working if config_id is later removed.
+			unified := NewInstagramUnifiedLoginAdapter(app.ClientID, app.ClientSecret, app.RedirectURI)
+			unified.configID = app.ConfigID
+			adapters[InstagramUnifiedProviderKey] = unified
+			entries = append(entries, RegistryEntry{
+				Key:            InstagramUnifiedProviderKey,
+				Provider:       app.Provider,
+				ConnectionMode: app.ConnectionMode,
+				Name:           app.Name,
+				InstanceURL:    app.InstanceURL,
+				Adapter:        unified,
+			})
+		}
 	}
 
 	return adapters, entries, nil
@@ -258,6 +273,9 @@ func AccountProviderKey(provider, instanceURL, capabilityStateJSON string) strin
 		_ = json.Unmarshal([]byte(capabilityStateJSON), &state)
 		if state["connection_type"] == ConnectionModeInstagramLogin {
 			return provider + ":" + ConnectionModeInstagramLogin
+		}
+		if state["connection_type"] == ConnectionModeUnifiedLogin {
+			return InstagramUnifiedProviderKey
 		}
 	}
 	if provider == providerMastodon || provider == providerPixelfed {
