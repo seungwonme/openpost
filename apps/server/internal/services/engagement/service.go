@@ -18,6 +18,7 @@ import (
 	"github.com/openpost/backend/internal/models"
 	"github.com/openpost/backend/internal/platform"
 	"github.com/openpost/backend/internal/services/dataretention"
+	"github.com/openpost/backend/internal/services/instagramwebhook"
 	"github.com/openpost/backend/internal/services/lifecycle"
 	"github.com/openpost/backend/internal/services/notifications"
 	"github.com/openpost/backend/internal/services/organizationguard"
@@ -1521,7 +1522,11 @@ func (s *Service) ListEngagementSyncStates(ctx context.Context, actor Actor, wor
 	for _, feed := range feeds {
 		states = append(states, models.EngagementSyncState{ID: "engagement:account:" + feed.SocialAccountID + ":" + feed.Feed, Feed: feed.Feed, WorkspaceID: feed.WorkspaceID, SocialAccountID: feed.SocialAccountID, Platform: feed.Platform, Status: feed.Status, ErrorCode: feed.ErrorCode, ErrorMessage: feed.ErrorMessage, LastAttemptedAt: feed.LastAttemptedAt, LastSuccessAt: feed.LastSuccessAt, NextSyncAt: feed.NextSyncAt})
 	}
-	return states, nil
+	webhooks, err := instagramwebhook.EngagementStates(ctx, s.db, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return append(states, webhooks...), nil
 }
 
 func (s *Service) SetEngagementState(ctx context.Context, actor Actor, workspaceID string, ids []string, read, archived *bool) error {

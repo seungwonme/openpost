@@ -554,3 +554,33 @@ func TestYouTubeReconnectRestoresRetiredDestinationIdentity(t *testing.T) {
 	require.Equal(t, "channel", restored.AccountID)
 	require.True(t, restored.IsActive)
 }
+
+func TestAfterSaveRunsForConnectAndReconnectButNotForFailedSaves(t *testing.T) {
+	db := createTestDB(t)
+	saver := NewAccountSaver(db, crypto.NewTokenEncryptor("test-secret-key-for-testing-only"))
+	seedWorkspaceMember(t, db, "workspace-1", "user-1")
+	var saved [][]string
+	saver.SetAfterSave(func(_ context.Context, accounts []*models.SocialAccount) {
+		ids := make([]string, 0, len(accounts))
+		for _, account := range accounts {
+			ids = append(ids, account.ID)
+		}
+		saved = append(saved, ids)
+	})
+	input := SaveAccountInput{
+		Actor: accountSaverActor("user-1"), UserID: "user-1", WorkspaceID: "workspace-1", PlatformName: "instagram",
+		AccountID: "17841400000000123", AccountUsername: "founder",
+		Token: &platform.TokenResult{AccessToken: "first", Extra: map[string]string{"user_id": "17841400000000123"}},
+	}
+	first, err := saver.SaveAccountFromInput(context.Background(), input)
+	require.NoError(t, err)
+	input.Token = &platform.TokenResult{AccessToken: "second", Extra: map[string]string{"user_id": "17841400000000123"}}
+	again, err := saver.SaveAccountFromInput(context.Background(), input)
+	require.NoError(t, err)
+	require.Equal(t, first.ID, again.ID, "reconnect keeps the account row")
+	require.Equal(t, [][]string{{first.ID}, {first.ID}}, saved)
+
+	_, err = saver.SaveAccountsFromInputs(context.Background(), nil)
+	require.Error(t, err)
+	require.Len(t, saved, 2, "a failed save must not notify")
+}

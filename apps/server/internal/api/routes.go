@@ -34,6 +34,7 @@ import (
 	"github.com/openpost/backend/internal/services/identity"
 	"github.com/openpost/backend/internal/services/imagecaption"
 	"github.com/openpost/backend/internal/services/imagegeneration"
+	"github.com/openpost/backend/internal/services/instagramwebhook"
 	"github.com/openpost/backend/internal/services/instancesettings"
 	"github.com/openpost/backend/internal/services/mastodonapps"
 	"github.com/openpost/backend/internal/services/mcpoauth"
@@ -499,7 +500,10 @@ func RegisterHumaRoutes(api huma.API, deps RouteDeps) {
 	afhHandler.ReadFeatures(api)
 	afhHandler.SaveFeatures(api)
 	oauthHandler.SetAccountFeaturesService(afhService)
-	oauthHandler.SetProviderRegistrars(append(providerRegistrars, afhService.SetProvider)...)
+	instagramWebhooks := instagramwebhook.NewService(deps.DB, deps.TokenSource, oauthHandler.ProviderMap())
+	afhService.SetWebhookSubscriber(instagramWebhooks)
+	oauthHandler.SetAccountSavedHook(instagramwebhook.ReconnectHook(instagramWebhooks))
+	oauthHandler.SetProviderRegistrars(append(providerRegistrars, afhService.SetProvider, instagramWebhooks.SetProvider)...)
 	// Inject shared feature resolver into every feature service and handler. Avoid duplicating support/scope/plan rules.
 	if deps.AnalyticsService != nil {
 		deps.AnalyticsService.SetFeatureGate(afhService)

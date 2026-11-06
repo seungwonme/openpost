@@ -261,6 +261,13 @@ func (h *OAuthHandler) SetTelemetry(recorder telemetry.Recorder) {
 	h.telemetry = recorder
 }
 
+// SetAccountSavedHook runs after an account connect or reconnect commits.
+func (h *OAuthHandler) SetAccountSavedHook(hook func(context.Context, []*models.SocialAccount)) {
+	if h.accountSaver != nil {
+		h.accountSaver.SetAfterSave(hook)
+	}
+}
+
 func (h *OAuthHandler) SetAccountFeaturesService(svc *accountfeatures.Service) {
 	h.accountFeatures = svc
 }
