@@ -59,3 +59,4 @@ export * from "./app-branding";
 export * from "./mentions";
 export * from "./saved-mentions";
 export * from "./comment-automation";
+export * from "./message-automation";

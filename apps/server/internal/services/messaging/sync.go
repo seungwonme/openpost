@@ -221,7 +221,7 @@ func (s *Service) persistConversationWithDB(ctx context.Context, tx bun.IDB, acc
 	}
 	newInbound := 0
 	for _, rm := range remote.Messages {
-		inserted, err := insertProviderMessage(ctx, tx, account, conversationID, rm, now)
+		inserted, err := s.storeProviderMessage(ctx, tx, account, conversationID, remote.CounterpartRemoteID, rm, now)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -316,6 +316,40 @@ func conversationSummaryChanged(existing models.Conversation, remote platform.Pr
 		!existing.MessagingWindowExpiresAt.Equal(remote.ReplyWindowExpiresAt)
 }
 
+// storeProviderMessage records what a provider message means for automation in
+// the transaction that stores it. An opt-out holds on every path, including a
+// redelivery or a repair. A takeover applies once, when the message is first stored.
+func (s *Service) storeProviderMessage(ctx context.Context, tx bun.IDB, account models.SocialAccount, conversationID, counterpart string, remote platform.ProviderMessage, now time.Time) (bool, error) {
+	inserted, err := insertProviderMessage(ctx, tx, account, conversationID, remote, now)
+	if err != nil {
+		return false, err
+	}
+	if err := s.recordMessageOptOut(ctx, tx, account, conversationID, counterpart, remote); err != nil {
+		return false, err
+	}
+	if inserted {
+		if err := s.recordProviderOutbound(ctx, tx, account, conversationID, remote); err != nil {
+			return false, err
+		}
+	} else if remote.Direction == "outbound" && remote.ID != "" {
+		if err := s.confirmOwnEcho(ctx, tx, conversationID, remote); err != nil {
+			return false, err
+		}
+	}
+	return inserted, nil
+}
+
+// storeHistoryMessage marks a message first stored from a history page, so that
+// reading back through a conversation cannot start a workflow.
+func (s *Service) storeHistoryMessage(ctx context.Context, tx bun.IDB, account models.SocialAccount, conversation models.Conversation, remote platform.ProviderMessage) error {
+	inserted, err := s.storeProviderMessage(ctx, tx, account, conversation.ID, conversation.CounterpartRemoteID, remote, s.now())
+	if err != nil || !inserted {
+		return err
+	}
+	_, err = tx.NewRaw(`INSERT INTO message_history_imports(message_id) SELECT id FROM direct_messages WHERE conversation_id = ? AND remote_message_id = ? ON CONFLICT DO NOTHING`, conversation.ID, remote.ID).Exec(ctx)
+	return err
+}
+
 func insertProviderMessage(ctx context.Context, db bun.IDB, account models.SocialAccount, conversationID string, remote platform.ProviderMessage, now time.Time) (bool, error) {
 	if remote.ID == "" {
 		return false, nil
@@ -375,7 +409,7 @@ func insertProviderMessage(ctx context.Context, db bun.IDB, account models.Socia
 func findStoredMessage(ctx context.Context, db bun.IDB, conversationID, remoteID string) (models.DirectMessage, bool, error) {
 	var stored models.DirectMessage
 	err := db.NewSelect().Model(&stored).
-		Column("id", "body", "attachments_json", "deleted_at", "remote_created_at").
+		Column("id", "body", "attachments_json", "deleted_at", "remote_created_at", "created_at").
 		Where("conversation_id = ? AND remote_message_id = ?", conversationID, remoteID).
 		Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {

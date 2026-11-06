@@ -91,6 +91,9 @@ func (s *Service) queueMessageReceipt(ctx context.Context, tx bun.Tx, actor Acto
 	if err != nil {
 		return nil, err
 	}
+	if err = s.stopAutomationForManualSend(ctx, tx, conversation, actor); err != nil {
+		return nil, err
+	}
 	if operationID != "" {
 		if _, err = tx.NewRaw(`INSERT INTO message_operations(workspace_id,user_id,conversation_id,operation_id,body_hash,message_id) VALUES(?,?,?,?,?,?)`, conversation.WorkspaceID, actor.UserID, conversation.ID, operationID, bodyHash, message.ID).Exec(ctx); err != nil {
 			return nil, err
@@ -178,6 +181,9 @@ func (s *Service) sendMessage(ctx context.Context, messageID string) error {
 		Where("id = ? AND workspace_id = ?", message.ConversationID, message.WorkspaceID).Scan(ctx); err != nil {
 		return err
 	}
+	if hold, err := s.prepareAutomatedSend(ctx, message, conversation); err != nil || hold {
+		return err
+	}
 	var account models.SocialAccount
 	if err := s.db.NewSelect().Model(&account).
 		Where("id = ? AND workspace_id = ? AND is_active = ?", conversation.SocialAccountID, conversation.WorkspaceID, true).Scan(ctx); err != nil {
@@ -205,6 +211,10 @@ func (s *Service) sendMessage(ctx context.Context, messageID string) error {
 		return sendErr
 	}
 	writeResult, err := s.sendMessageThroughFence(ctx, message, conversation, account, provider, token)
+	var stopped *automationSendStopped
+	if errors.As(err, &stopped) {
+		return s.stopAutomatedMessage(ctx, message, conversation, stopped)
+	}
 	if err != nil {
 		s.recordSendFailure(ctx, message, conversation, account, err)
 		return err
@@ -257,6 +267,9 @@ func (s *Service) acceptSentMessage(ctx context.Context, message models.DirectMe
 			query = query.Set("last_message_preview=CASE WHEN last_remote_message_id=? OR last_message_at<=? THEN '' ELSE last_message_preview END", remoteID, message.CreatedAt)
 		}
 		if _, err = query.Exec(txCtx); err != nil {
+			return err
+		}
+		if err = s.recordAutomationAcceptance(txCtx, tx, message.ID); err != nil {
 			return err
 		}
 		changes = append(changes, inboxchanges.Change{Kind: "message", ConversationID: conversation.ID, MessageID: message.ID, Deleted: !message.DeletedAt.IsZero()})
@@ -335,7 +348,7 @@ func (s *Service) sendMessageThroughFence(
 		SocialAccountID: account.ID, TargetKey: providerKey(account), Provider: account.Platform,
 		Operation: "message_send", PayloadFingerprint: fingerprint,
 	}, func(sendCtx context.Context, control *providerwrite.Control) (platform.PublishResult, error) {
-		if err := control.Begin(platform.PublishResult{ProviderState: "send_message", RetrySafety: platform.PublishRetryNever}); err != nil {
+		if err := control.BeginGuarded(platform.PublishResult{ProviderState: "send_message", RetrySafety: platform.PublishRetryNever}, s.automationSendGuard(message)); err != nil {
 			return platform.PublishResult{}, err
 		}
 		result, err := provider.SendMessage(sendCtx, token, request)
@@ -360,6 +373,9 @@ func (s *Service) recordSendFailure(ctx context.Context, message models.DirectMe
 			return err
 		}
 		if _, err := tx.NewUpdate().Model(&message).Set("send_status=?", status).Set("error_message=?", errorMessage).Set("updated_at=?", s.now()).WherePK().Exec(txCtx); err != nil {
+			return err
+		}
+		if err := s.recordAutomationFailure(txCtx, tx, message.ID, status, errorMessage); err != nil {
 			return err
 		}
 		return inboxchanges.Append(txCtx, tx, message.WorkspaceID, inboxchanges.Change{Kind: "message", ConversationID: conversation.ID, MessageID: message.ID})

@@ -18,6 +18,7 @@ export function actionCategory(kind: Step['kind']): NodeCategory {
 			'comment_reply',
 			'private_comment_reply',
 			'comment_handoff',
+			'message_reply',
 			'metrics'
 		].includes(kind)
 	)
@@ -30,6 +31,7 @@ export function sourceIcon(kind: Definition['source']['kind']): ThemeIconRole {
 	return (
 		{
 			comment_received: 'communications',
+			message_received: 'inbox',
 			manual: 'launch',
 			github_release: 'github',
 			rss: 'download',
@@ -47,6 +49,12 @@ export function actionCatalog(): {
 	icon: ThemeIconRole;
 }[] {
 	return [
+		{
+			kind: 'message_reply',
+			label: m.workflows_message_reply_node(),
+			description: m.workflows_message_reply_help(),
+			icon: 'communications'
+		},
 		{
 			kind: 'private_comment_reply',
 			label: m.workflows_comment_private_node(),
@@ -192,6 +200,7 @@ export function actionCatalog(): {
 export function sourceLabel(kind: Definition['source']['kind']): string {
 	return {
 		comment_received: m.workflows_comment_received(),
+		message_received: m.workflows_message_received(),
 		manual: m.workflows_manual(),
 		github_release: m.workflows_github(),
 		rss: m.workflows_rss(),
@@ -265,6 +274,12 @@ export function newStep(kind: Step['kind']): Step {
 			text: literal(''),
 			delivery: literal('review')
 		});
+	if (kind === 'message_reply')
+		Object.assign(inputs, {
+			message_id: reference('source.message_id'),
+			text: literal(''),
+			delivery: literal('review')
+		});
 	if (kind === 'comment_handoff') inputs.engagement_id = reference('source.engagement_id');
 	if (kind === 'comment_reply')
 		Object.assign(inputs, {
@@ -324,6 +339,7 @@ export function templates(): {
 	});
 	return [
 		...commentTemplates(),
+		...messageTemplates(),
 		{
 			id: 'digest',
 			name: m.workflows_template_digest(),
@@ -584,6 +600,40 @@ export function commentTemplates() {
 	] satisfies { id: string; name: string; description: string; definition: Definition }[];
 }
 
+function messageTemplates() {
+	return [
+		{
+			id: 'instagram-dm-keyword',
+			name: m.workflows_message_template(),
+			description: m.workflows_message_template_help(),
+			definition: {
+				schema: 1,
+				source: {
+					kind: 'message_received',
+					account_ids: [],
+					keywords: ['GUIDE'],
+					excluded_keywords: [],
+					match_mode: 'word',
+					daily_limit: 100,
+					priority: 50
+				},
+				steps: [
+					{
+						id: 'reply',
+						kind: 'message_reply',
+						name: m.workflows_message_reply_node(),
+						inputs: {
+							message_id: reference('source.message_id'),
+							text: literal(''),
+							delivery: literal('review')
+						}
+					}
+				]
+			}
+		}
+	] satisfies { id: string; name: string; description: string; definition: Definition }[];
+}
+
 export function findStep(steps: Step[], id: string): Step | undefined {
 	for (const step of steps) {
 		if (step.id === id) return step;
@@ -631,6 +681,14 @@ export function exampleSource(kind: Definition['source']['kind']): WorkflowData 
 	if (kind === 'comment_received') {
 		data.engagement_id = 'sample-comment';
 		data.body = 'GRIND please!';
+		data.platform = 'instagram';
+		data.author_name = 'Sample reader';
+	}
+	if (kind === 'message_received') {
+		data.message_id = 'sample-message';
+		data.conversation_id = 'sample-conversation';
+		data.account_id = 'sample-account';
+		data.body = 'GUIDE please';
 		data.platform = 'instagram';
 		data.author_name = 'Sample reader';
 	}

@@ -180,6 +180,8 @@ func (s *Service) readPolledSource(ctx context.Context, record workflowRecord, s
 	switch source.Kind {
 	case "comment_received":
 		items, err = s.commentItems(ctx, record.WorkspaceID, source, since, &record)
+	case "message_received":
+		items, err = s.messageItems(ctx, record.WorkspaceID, source, since, &record)
 	case "publication_created":
 		items, err = s.publicationItems(ctx, record.WorkspaceID, since, &record)
 	case "rendition_failed":
@@ -213,8 +215,11 @@ func (s *Service) commitSourcePoll(ctx context.Context, record workflowRecord, d
 			return err
 		}
 		capped, err := commentDailyLimitReached(ctx, tx, record, def, now)
-		if err != nil || capped {
+		if err != nil {
 			return err
+		}
+		if capped {
+			return noteMessageDailyLimit(ctx, tx, record, def)
 		}
 
 		// Admit oldest first so a feed's newest-first presentation does not reverse
@@ -226,7 +231,7 @@ func (s *Service) commitSourcePoll(ctx context.Context, record workflowRecord, d
 				_, err := tx.NewUpdate().Model((*workflowRecord)(nil)).Set("source_page = ?, source_error = ?", record.SourcePage, "workspace has reached 1000 active workflow runs").Where("id = ?", id).Exec(ctx)
 				return err
 			}
-			admit, err := s.admitSourceEvent(ctx, tx, record, def, item, now)
+			admit, err := s.admitSourceEvent(ctx, tx, record, def, authority, item, now)
 			if err != nil {
 				return err
 			}
@@ -247,7 +252,7 @@ func (s *Service) commitSourcePoll(ctx context.Context, record workflowRecord, d
 				return err
 			}
 			if capped {
-				break
+				return noteMessageDailyLimit(ctx, tx, record, def)
 			}
 		}
 		return nil
@@ -263,7 +268,7 @@ func (s *Service) pollError(ctx context.Context, record workflowRecord, leaseUnt
 }
 
 func sourceEventKey(kind, id string) (string, error) {
-	if kind == "rendition_published" || kind == "publication_created" || kind == "rendition_failed" || kind == "comment_received" {
+	if kind == "rendition_published" || kind == "publication_created" || kind == "rendition_failed" || isInteractionSource(kind) {
 		return id, nil
 	}
 	return idempotency.Hash([]string{kind, id})
@@ -280,14 +285,18 @@ func sourceItemValues(item SourceItem) (map[string]any, error) {
 }
 
 func commentDailyLimitReached(ctx context.Context, db bun.IDB, record workflowRecord, def Definition, now time.Time) (bool, error) {
-	if def.Source.Kind != "comment_received" {
+	if !isInteractionSource(def.Source.Kind) {
 		return false, nil
 	}
-	count, err := db.NewSelect().Model((*runRecord)(nil)).Where("workflow_id = ? AND mode = ? AND created_at >= ?", record.ID, ModeLive, now.Truncate(24*time.Hour)).Count(ctx)
+	query := db.NewSelect().Model((*runRecord)(nil)).Where("workflow_id = ? AND mode = ? AND created_at >= ?", record.ID, ModeLive, now.Truncate(24*time.Hour))
+	if def.Source.Kind == "message_received" {
+		query = countMessageRuns(query, def)
+	}
+	count, err := query.Count(ctx)
 	return count >= def.Source.DailyLimit, err
 }
 
-func (s *Service) admitSourceEvent(ctx context.Context, tx bun.Tx, record workflowRecord, def Definition, item SourceItem, now time.Time) (bool, error) {
+func (s *Service) admitSourceEvent(ctx context.Context, tx bun.Tx, record workflowRecord, def Definition, authority workspaceaccess.StoredAuthority, item SourceItem, now time.Time) (bool, error) {
 	key, err := sourceEventKey(def.Source.Kind, item.ID)
 	if err != nil {
 		return false, err
@@ -313,6 +322,9 @@ func (s *Service) admitSourceEvent(ctx context.Context, tx bun.Tx, record workfl
 		if !winner {
 			return false, nil
 		}
+	}
+	if def.Source.Kind == "message_received" {
+		return s.admitMessageEvent(ctx, tx, record, def, authority, item, now)
 	}
 	return true, nil
 }

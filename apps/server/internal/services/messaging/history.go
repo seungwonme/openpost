@@ -78,7 +78,8 @@ func (s *Service) syncHistory(ctx context.Context, accountID, conversationID str
 }
 
 func (s *Service) persistHistoryPage(ctx context.Context, account models.SocialAccount, c models.Conversation, page platform.FetchMessageHistoryResult) error {
-	return s.db.RunInTx(ctx, &sql.TxOptions{}, func(txCtx context.Context, tx bun.Tx) error {
+	var received []receivedMessage
+	err := s.db.RunInTx(ctx, &sql.TxOptions{}, func(txCtx context.Context, tx bun.Tx) error {
 		if err := organizationguard.LockWorkspace(txCtx, tx, account.WorkspaceID); err != nil {
 			return err
 		}
@@ -102,9 +103,12 @@ func (s *Service) persistHistoryPage(ctx context.Context, account models.SocialA
 		if err != nil {
 			return err
 		}
+		if received, err = s.storeLateDeliveries(txCtx, tx, account, c, page.Messages); err != nil {
+			return err
+		}
 		// History is not a new incoming event: retain its position and unread state.
 		for _, remote := range page.Messages {
-			if _, err := insertProviderMessage(txCtx, tx, account, c.ID, remote, s.now()); err != nil {
+			if err := s.storeHistoryMessage(txCtx, tx, account, c, remote); err != nil {
 				return err
 			}
 		}
@@ -116,6 +120,10 @@ func (s *Service) persistHistoryPage(ctx context.Context, account models.SocialA
 		changes = append(changes, inboxchanges.Change{Kind: "message", ConversationID: c.ID})
 		return inboxchanges.Append(txCtx, tx, account.WorkspaceID, changes...)
 	})
+	if err == nil {
+		s.notifyReceivedMessages(ctx, account, received)
+	}
+	return err
 }
 
 func (s *Service) historyAvailable(ctx context.Context, conversation models.Conversation) (bool, error) {

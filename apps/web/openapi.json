@@ -2440,6 +2440,66 @@
 				"required": ["redirect_url"],
 				"type": "object"
 			},
+			"AutomationMessage": {
+				"additionalProperties": false,
+				"properties": {
+					"body": {
+						"type": "string"
+					},
+					"conversation_id": {
+						"type": "string"
+					},
+					"created_at": {
+						"format": "date-time",
+						"type": "string"
+					},
+					"id": {
+						"type": "string"
+					},
+					"message_id": {
+						"type": "string"
+					},
+					"reason": {
+						"type": "string"
+					},
+					"run_id": {
+						"type": "string"
+					},
+					"state": {
+						"type": "string"
+					},
+					"step_id": {
+						"type": "string"
+					},
+					"trigger_message_id": {
+						"type": "string"
+					},
+					"updated_at": {
+						"format": "date-time",
+						"type": "string"
+					},
+					"workflow_id": {
+						"type": "string"
+					},
+					"workspace_id": {
+						"type": "string"
+					}
+				},
+				"required": [
+					"id",
+					"workspace_id",
+					"conversation_id",
+					"trigger_message_id",
+					"workflow_id",
+					"run_id",
+					"step_id",
+					"body",
+					"state",
+					"created_at",
+					"updated_at"
+				],
+				"type": "object"
+			},
 			"AutomationReply": {
 				"additionalProperties": false,
 				"properties": {
@@ -4699,6 +4759,52 @@
 					"created_at",
 					"updated_at"
 				],
+				"type": "object"
+			},
+			"ConversationAutomation": {
+				"additionalProperties": false,
+				"properties": {
+					"$schema": {
+						"description": "A URL to the JSON Schema for this object.",
+						"examples": ["https://example.com/api/v1/schemas/ConversationAutomation.json"],
+						"format": "uri",
+						"readOnly": true,
+						"type": "string"
+					},
+					"lapsed_at": {
+						"format": "date-time",
+						"type": "string"
+					},
+					"lapses_at": {
+						"format": "date-time",
+						"type": "string"
+					},
+					"opt_out_removed_at": {
+						"format": "date-time",
+						"type": "string"
+					},
+					"opt_out_removed_by": {
+						"type": "string"
+					},
+					"opted_out_at": {
+						"format": "date-time",
+						"type": "string"
+					},
+					"replies": {
+						"items": {
+							"$ref": "#/components/schemas/AutomationMessage"
+						},
+						"type": ["array", "null"]
+					},
+					"stop_reason": {
+						"type": "string"
+					},
+					"stopped_at": {
+						"format": "date-time",
+						"type": "string"
+					}
+				},
+				"required": ["replies"],
 				"type": "object"
 			},
 			"ConversationPage": {
@@ -7971,6 +8077,9 @@
 					},
 					"author_name": {
 						"type": "string"
+					},
+					"author_opted_out": {
+						"type": "boolean"
 					},
 					"author_remote_id": {
 						"type": "string"
@@ -22622,6 +22731,30 @@
 				"required": ["claimed"],
 				"type": "object"
 			},
+			"State": {
+				"additionalProperties": false,
+				"properties": {
+					"$schema": {
+						"description": "A URL to the JSON Schema for this object.",
+						"examples": ["https://example.com/api/v1/schemas/State.json"],
+						"format": "uri",
+						"readOnly": true,
+						"type": "string"
+					},
+					"opt_out_removed_at": {
+						"format": "date-time",
+						"type": "string"
+					},
+					"opt_out_removed_by": {
+						"type": "string"
+					},
+					"opted_out_at": {
+						"format": "date-time",
+						"type": "string"
+					}
+				},
+				"type": "object"
+			},
 			"Status": {
 				"additionalProperties": false,
 				"properties": {
@@ -27182,7 +27315,8 @@
 							"interval",
 							"publication_created",
 							"rendition_failed",
-							"comment_received"
+							"comment_received",
+							"message_received"
 						],
 						"type": "string"
 					},
@@ -27241,6 +27375,9 @@
 					"body": {
 						"type": "string"
 					},
+					"conversation_id": {
+						"type": "string"
+					},
 					"created_at": {
 						"type": "string"
 					},
@@ -27248,6 +27385,9 @@
 						"type": "string"
 					},
 					"id": {
+						"type": "string"
+					},
+					"message_id": {
 						"type": "string"
 					},
 					"platform": {
@@ -27329,6 +27469,7 @@
 							"comment_reply",
 							"private_comment_reply",
 							"comment_handoff",
+							"message_reply",
 							"wait",
 							"condition",
 							"metrics",
@@ -40974,6 +41115,94 @@
 				}
 			}
 		},
+		"/engagement/{id}/automation/opt-out/remove": {
+			"post": {
+				"operationId": "remove-engagement-automation-opt-out",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "id",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"explode": false,
+						"in": "query",
+						"name": "workspace_id",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/State"
+								}
+							}
+						},
+						"description": "OK"
+					},
+					"403": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Forbidden"
+					},
+					"404": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Not Found"
+					},
+					"422": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Unprocessable Entity"
+					},
+					"500": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Internal Server Error"
+					},
+					"503": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Service Unavailable"
+					}
+				},
+				"summary": "Remove this comment author's opt-out from automatic messages and replies",
+				"tags": ["Engagement"]
+			}
+		},
 		"/engagement/{id}/automation/stop": {
 			"post": {
 				"operationId": "stop-engagement-automation",
@@ -47978,6 +48207,379 @@
 							"value_path": "id"
 						}
 					]
+				}
+			}
+		},
+		"/messages/{conversation_id}/automation": {
+			"get": {
+				"operationId": "get-message-automation",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "conversation_id",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"explode": false,
+						"in": "query",
+						"name": "workspace_id",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ConversationAutomation"
+								}
+							}
+						},
+						"description": "OK"
+					},
+					"403": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Forbidden"
+					},
+					"404": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Not Found"
+					},
+					"422": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Unprocessable Entity"
+					},
+					"500": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Internal Server Error"
+					},
+					"503": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Service Unavailable"
+					}
+				},
+				"summary": "Inspect automatic messages in a conversation",
+				"tags": ["Messaging"],
+				"x-openpost-automation": {
+					"access": "read",
+					"effect": "query",
+					"exposure": "disabled",
+					"idempotency": "none",
+					"retry": "transient"
+				}
+			}
+		},
+		"/messages/{conversation_id}/automation/opt-out/remove": {
+			"post": {
+				"operationId": "remove-message-automation-opt-out",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "conversation_id",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"explode": false,
+						"in": "query",
+						"name": "workspace_id",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ConversationAutomation"
+								}
+							}
+						},
+						"description": "OK"
+					},
+					"403": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Forbidden"
+					},
+					"404": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Not Found"
+					},
+					"422": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Unprocessable Entity"
+					},
+					"500": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Internal Server Error"
+					},
+					"503": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Service Unavailable"
+					}
+				},
+				"summary": "Remove this person's opt-out from automatic messages and replies",
+				"tags": ["Messaging"]
+			}
+		},
+		"/messages/{conversation_id}/automation/resume": {
+			"post": {
+				"operationId": "resume-message-automation",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "conversation_id",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"explode": false,
+						"in": "query",
+						"name": "workspace_id",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ConversationAutomation"
+								}
+							}
+						},
+						"description": "OK"
+					},
+					"403": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Forbidden"
+					},
+					"404": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Not Found"
+					},
+					"422": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Unprocessable Entity"
+					},
+					"500": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Internal Server Error"
+					},
+					"503": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Service Unavailable"
+					}
+				},
+				"summary": "Let future messages in a conversation start automation again",
+				"tags": ["Messaging"],
+				"x-openpost-automation": {
+					"access": "write",
+					"effect": "local-mutation",
+					"exposure": "disabled",
+					"idempotency": "none",
+					"retry": "never"
+				}
+			}
+		},
+		"/messages/{conversation_id}/automation/stop": {
+			"post": {
+				"operationId": "stop-message-automation",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "conversation_id",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"explode": false,
+						"in": "query",
+						"name": "workspace_id",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ConversationAutomation"
+								}
+							}
+						},
+						"description": "OK"
+					},
+					"403": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Forbidden"
+					},
+					"404": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Not Found"
+					},
+					"422": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Unprocessable Entity"
+					},
+					"500": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Internal Server Error"
+					},
+					"503": {
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/ErrorModel"
+								}
+							}
+						},
+						"description": "Service Unavailable"
+					}
+				},
+				"summary": "Take over a conversation and stop automatic messages",
+				"tags": ["Messaging"],
+				"x-openpost-automation": {
+					"access": "write",
+					"effect": "local-mutation",
+					"exposure": "disabled",
+					"idempotency": "none",
+					"retry": "never"
 				}
 			}
 		},

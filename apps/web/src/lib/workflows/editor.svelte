@@ -614,7 +614,7 @@
 				</DropdownMenu.Root>
 			</div>
 			<div class="flex items-center gap-2">
-				{#if sourceKind === 'comment_received' || record.has_comment_replies}<Button
+				{#if sourceKind === 'comment_received' || sourceKind === 'message_received' || record.has_comment_replies}<Button
 						size="sm"
 						variant="outline"
 						disabled={!canAdmin || busy}

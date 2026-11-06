@@ -1,5 +1,5 @@
 {
   "title": "Examples",
   "icon": "Shapes",
-  "pages": ["feed-digest", "relevant-releases", "api-to-post", "comment-playbook"]
+  "pages": ["feed-digest", "relevant-releases", "api-to-post", "comment-playbook", "instagram-dm-reply"]
 }

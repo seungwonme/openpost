@@ -57,3 +57,58 @@ it('refreshes discovered source fields when the sample changes', () => {
 		}))
 	).toEqual([{ node: 'first', field: 'text' }]);
 });
+
+const messageReply = (id: string): Step => ({
+	id,
+	kind: 'message_reply',
+	name: id,
+	inputs: {
+		message_id: { reference: 'source.message_id' },
+		text: { literal: 'Here is the guide' },
+		delivery: { literal: 'review' }
+	}
+});
+const waitFor = (id: string, minutes: number): Step => ({
+	id,
+	kind: 'wait',
+	name: id,
+	inputs: { minutes: { literal: minutes } }
+});
+
+it('requires an account and daily limit for the message trigger', () => {
+	const issues = workflowIssues({
+		schema: 1,
+		source: { kind: 'message_received' },
+		steps: [messageReply('reply')]
+	});
+	expect(issues.filter(({ node }) => node === 'source').map(({ field }) => field)).toEqual([
+		'account_ids',
+		'daily_limit'
+	]);
+});
+
+it('rejects a delay the Instagram messaging window can never accommodate, across branches', () => {
+	const source: Definition['source'] = {
+		kind: 'message_received',
+		account_ids: ['instagram'],
+		daily_limit: 20
+	};
+	const delayed = (steps: Step[]) =>
+		workflowIssues({ schema: 1, source, steps }).filter(({ field }) => field === 'text');
+	expect(delayed([waitFor('wait', 1439), messageReply('reply')])).toEqual([]);
+	expect(delayed([waitFor('wait', 1440), messageReply('reply')]).map(({ node }) => node)).toEqual([
+		'reply'
+	]);
+	const branch: Step = {
+		id: 'branch',
+		kind: 'condition',
+		name: 'branch',
+		inputs: {
+			left: { literal: 'a' },
+			operator: { literal: 'equals' },
+			right: { literal: 'a' }
+		},
+		then: [waitFor('inside', 1500)]
+	};
+	expect(delayed([branch, messageReply('after')]).map(({ node }) => node)).toEqual(['after']);
+});

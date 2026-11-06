@@ -137,7 +137,7 @@ func (s *Service) executeEffect(ctx context.Context, record runRecord, authority
 			return EffectResult{}, errors.New("schedule requires approval of this publication and revision in this run")
 		}
 	}
-	if isCommentAction(step.Kind) {
+	if isInboxAction(step.Kind) {
 		inputs["workflow_id"] = record.WorkflowID
 	}
 	return s.actions.Execute(ctx, EffectRequest{Kind: step.Kind, Inputs: inputs, Authority: authority, RunID: record.ID, StepID: step.ID, ExpiresAt: record.CreatedAt.Add(MaxRunAge + 24*time.Hour)})
@@ -335,6 +335,10 @@ func previewOutput(step Step, inputs map[string]any) map[string]any {
 		output["engagement_id"] = inputs["engagement_id"]
 		output["text"] = inputs["text"]
 		output["channel"] = inputs["channel"]
+		output["status"] = "preview"
+	case KindMessageReply:
+		output["message_id"] = inputs["message_id"]
+		output["text"] = inputs["text"]
 		output["status"] = "preview"
 	case KindReply:
 		output["rendition_id"] = inputs["rendition_id"]

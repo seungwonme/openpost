@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -35,4 +36,19 @@ func TestInstagramPrivateReplyAddressesCommentInBothLoginModes(t *testing.T) {
 			require.Equal(t, "dm-42", id)
 		})
 	}
+}
+
+func TestInstagramWebhookCommentWithNoTimeIsStillRead(t *testing.T) {
+	original := httpClient
+	t.Cleanup(func() { httpClient = original })
+	httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.Contains(req.URL.Path, "comment-42") {
+			return jsonResponse(req, `{"id":"comment-42","text":"stop","from":{"id":"reader","username":"reader"}}`), nil
+		}
+		return jsonResponse(req, `{"id":"media-1","permalink":"https://example.test/p/1","media_product_type":"FEED"}`), nil
+	})}
+	comment, _, err := NewInstagramAdapter("", "", "").ReadWebhookComment(context.Background(), "token", "owner", "comment-42", "media-1")
+	require.NoError(t, err, "a refusal must reach the opt-out check")
+	require.Equal(t, "stop", comment.Text)
+	require.Empty(t, comment.CreatedAt)
 }

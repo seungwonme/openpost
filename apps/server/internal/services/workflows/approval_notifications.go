@@ -461,7 +461,7 @@ func (s *Service) resolveApprovalNotices(ctx context.Context, db bun.IDB, record
 
 func approvalLevel(record runRecord) workspaceaccess.Level {
 	step, ok := parkedApproval(decodeRunResults(record))
-	if ok && (step.Kind == KindCommentReply || step.Kind == KindPrivateReply) {
+	if ok && isReviewedReply(step.Kind) {
 		return workspaceaccess.LevelAdminister
 	}
 	return workspaceaccess.LevelApprove

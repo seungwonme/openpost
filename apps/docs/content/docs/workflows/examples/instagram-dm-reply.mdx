@@ -1,0 +1,83 @@
+---
+title: Reply to Instagram messages
+description: Answer an Instagram direct message that contains your keyword, once, while the messaging window is open.
+icon: MessagesSquare
+---
+
+Use this workflow when people message your account with a keyword such as `GUIDE`. It sends your saved text to the person who asked. It does not need an AI provider and it never messages anyone who has not messaged you.
+
+## Before you start
+
+Connect an Instagram professional account and turn on **Messages** for it. The trigger reads messages stored in Inbox, so the account's messaging permissions and Meta webhook subscription must already deliver them.
+
+## Create the workflow
+
+Open **Workflows → Templates → Reply to Instagram keyword messages**. The draft opens in the workflow editor.
+
+1. Open the trigger and choose the Instagram account.
+2. Enter keywords separated by commas. Matching ignores capitalization, and the default matches whole words or phrases. Leave the field empty to match every message.
+3. Open the **Reply to message** step and write the message, up to 1,000 bytes. Variables such as `{{source.author_name}}` count after they render.
+4. Keep **Review in Inbox** while you check the wording, or choose **Send automatically**.
+5. Select **Publish workflow** to activate it. Creating, saving and previewing the draft send nothing.
+
+## Narrow the trigger
+
+Open **Configure** in the trigger to exclude keywords, choose whole-word, exact or contains matching, change the daily run limit, or adjust reply priority. Lower priority numbers answer first when several reply workflows match the same message, and only one replies. Equal priorities use the oldest workflow. A workflow that sends nothing can still run independently.
+
+Only messages created and first stored after activation start runs. Earlier messages, messages first loaded by scrolling back through a conversation's history, your own messages and messages from another account you connected do not. A new message that appears in history because its delivery is late still counts as new. Reactivating a paused workflow starts with future messages again. New messages start a run within about five minutes.
+
+## Review or take over
+
+Open the conversation in **Inbox → Messages** to see each automatic message and its state. Workspace administrators can edit a message waiting for review and approve it. Editors can select **Take over**.
+
+**Take over** stops pending automatic messages and every run for that conversation, including a run in a wait step. So does a reply sent by hand, in OpenPost or in the Instagram app, whether or not a run is active. Automation stays stopped in that conversation until someone selects **Resume automation**, which applies to future messages. Runs that stopped stay stopped. Messages already being sent may still be delivered.
+
+**Pause** stops new runs and leaves existing runs active. **Stop automatic replies** stops new runs and pending sends.
+
+## What stops a message
+
+Before each automatic message, OpenPost reads the conversation from Instagram and checks the result, so a recent request to stop is seen even if its webhook has not arrived. If Instagram cannot be read, OpenPost holds the message and retries for up to 10 minutes, then stops with a reason. It also checks after a review or a queue delay. The run fails and shows the reason when any of these is true:
+
+- Instagram's messaging window closed. The window normally lasts 24 hours from the person's latest message. OpenPost does not use message tags to extend it.
+- The person opted out.
+- A person took over the conversation.
+- The person deleted the message.
+- The account lost its connection or its messaging permission.
+
+A delay of 24 hours or more before a reply step fails when you publish, because that message could never be sent.
+
+### Opting out
+
+OpenPost sorts a message that mentions stopping into two groups. Capitalization, spacing and punctuation are ignored.
+
+**A definite refusal** has nothing else in it. It opts that person out of automatic messages from the account, and it also covers that account's comment automation. It stays until someone removes it, and pending messages are cancelled. A refusal more than 30 days old, first found while reading history, creates no opt-out.
+
+| Language | Definite refusals                                                                                                                                                                                                                               |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| English  | `stop`, with `please`, `now`, `it` and similar words. `stop` followed by `replying`, `reply`, `messaging`, `message`, `messages`, `msg`, `msgs`, `texting`, `texts`, `sending`, `send`, `contacting`, `contact`, `dm`, `dms`, `dming`, `spam` or `spamming`, which `me` or `us` can follow. `unsubscribe`, `unsub`, `opt out`, `remove me`, `leave me alone`, `no more messages`, `do not message me` and `do not text me`. |
+| Korean   | `그만`, `그만해요`, `그만 해주세요`, `그만 보내주세요`, `보내지 마세요`, `연락하지 마세요`, `연락 주지 마세요`, `연락 마세요`, `수신거부`, `수신거부합니다`, `스탑` and `스톱`, with or without spaces, and with `제발`, `이제` or `좀`.                   |
+
+**A possible request** is a short message, up to six English words or 16 Korean characters, with the same words and other content, a question or a negation. `수신거부 어떻게 하나요`, `이제 그만 고민할게요`, `how do i unsubscribe`, `can you stop`, `stop this`, `stop all`, `stop me`, `stop?` and `알림 끄는 법` are examples. So is a refusal with an emoji, such as `stop it 😂`, and `구독취소` or `구독 해지해주세요`, because cancelling a subscription can be about a paid plan. So are `cancel`, `cancel it`, `cancel this`, `cancel all`, `cancel please`, `거부`, `차단` and `알림 꺼주세요`, because they do not say what to stop. OpenPost records no opt-out, sends nothing further in that conversation, and hands it to a person with the reason on the conversation. Someone then reads the message and chooses **Resume automation** or leaves it stopped. This does not end by itself, and it does not affect comment automation.
+
+`stop by the shop`, `don't stop`, `can't stop`, `bus stop`, `next stop is seoul` and words like `그만큼` and `그만두` are neither. A longer message that mentions these words is neither too, so automation keeps running and a refusal inside a long message can be missed. Ordinary business is neither too, and automation keeps running: `cancel my order`, `can i cancel`, `주문 취소 cancel 가능한가요`, `차단 해제 어떻게 해요`, `카드 거부`, and reports of a phone setting such as `알림 꺼졌어요`, `알림 꺼놨어요` and `알림꺼짐`.
+
+A message in either group never starts a workflow. Automation does not read meaning, so a person checks every message in the second group.
+
+To remove an opt-out, open the conversation or the person's comment in Inbox and choose **Remove opt-out**. This needs Edit permission. It applies to that person on the account for both comments and direct messages, and OpenPost records who removed it and when. It starts nothing by itself, stopped runs stay stopped, and a new refusal from the person opts them out again.
+
+### Taking over
+
+A person replying in Inbox or the Instagram app takes over the conversation. Automation stops there, and active runs are cancelled. This takeover ends seven days after that person's last message, and Inbox shows the date. Choosing **Take over** or **Resume automation** yourself is a decision that does not expire: a takeover you pressed lasts until someone resumes it.
+
+A message the account sent more than 24 hours ago does not start a takeover. Instagram can report OpenPost's own send under another ID. OpenPost treats a message with the same text within an hour of a send as that send's echo, once per send, so a person who repeats the exact text of an automated message within that hour may not be detected the first time.
+
+### Limits
+
+- A conversation receives at most five automatic messages an hour and 20 in 24 hours, across all workflows and comment campaigns. This also stops two connected accounts from answering each other indefinitely.
+- One person starts at most five runs of a workflow a day, whatever those runs went on to do, so they cannot use up its daily run limit or keep paid AI steps running. A later message appears as a stopped run that says why.
+- Runs that failed, were stopped, or were skipped do not count toward the daily run limit, unless the workflow has an AI step, which costs money either way. When the limit is reached the workflow shows it, and later messages wait until the next day.
+- Messages in a conversation someone took over never start a run.
+
+Failed and unconfirmed sends remain inspectable. OpenPost does not repeat a send when the outcome is uncertain. One message gets at most one automatic reply, even if Meta delivers its webhook twice.
+
+See [Meta's messaging documentation](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api) for provider requirements. This workflow does not include follower gates, email capture or broadcasts.

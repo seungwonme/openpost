@@ -22,7 +22,7 @@ func Validate(def Definition, complete bool) error {
 	if err != nil || len(raw) > 256*1024 {
 		return invalid("workflow is too large")
 	}
-	if !slices.Contains([]string{"manual", "github_release", "rss", "rendition_published", "interval", "publication_created", "rendition_failed", "comment_received"}, def.Source.Kind) {
+	if !slices.Contains([]string{"manual", "github_release", "rss", "rendition_published", "interval", "publication_created", "rendition_failed", "comment_received", "message_received"}, def.Source.Kind) {
 		return invalid("choose a supported source")
 	}
 	if complete {
@@ -32,6 +32,9 @@ func Validate(def Definition, complete bool) error {
 		if len(def.Steps) == 0 {
 			return invalid("add at least one step")
 		}
+		if err := validateMessageAutomation(def); err != nil {
+			return err
+		}
 	}
 	validator := definitionValidator{seen: map[string]bool{"source": true}, complete: complete}
 	return validator.walk(def.Steps, map[string]bool{"source": true}, 0)
@@ -40,6 +43,8 @@ func validateSource(source Source) error {
 	switch source.Kind {
 	case "comment_received":
 		return validateCommentSource(source)
+	case "message_received":
+		return validateMessageSource(source)
 	case "interval":
 		if source.IntervalMinutes < 5 || source.IntervalMinutes > 43200 {
 			return invalid("choose an interval between 5 minutes and 30 days")
@@ -97,7 +102,7 @@ func (v *definitionValidator) walk(steps []Step, available map[string]bool, dept
 	return nil
 }
 func validateStep(step Step, available map[string]bool, complete bool) error {
-	if !slices.Contains([]string{KindDraft, KindBuild, KindApproval, KindSchedule, KindReply, KindCommentReply, KindPrivateReply, KindCommentHandoff, KindWait, KindCondition, KindMetrics, KindHTTP, KindCode, KindAIText, KindAIDecision, KindFields, KindText, KindJSON, KindFilter, KindSort, KindLimit, KindMerge, KindDate, KindURL, KindFeed}, step.Kind) {
+	if !slices.Contains([]string{KindDraft, KindBuild, KindApproval, KindSchedule, KindReply, KindCommentReply, KindPrivateReply, KindCommentHandoff, KindMessageReply, KindWait, KindCondition, KindMetrics, KindHTTP, KindCode, KindAIText, KindAIDecision, KindFields, KindText, KindJSON, KindFilter, KindSort, KindLimit, KindMerge, KindDate, KindURL, KindFeed}, step.Kind) {
 		return invalid("unsupported step kind")
 	}
 	if len(step.Name) > 100 || len(step.Inputs) > 20 {
@@ -111,10 +116,8 @@ func validateStep(step Step, available map[string]bool, complete bool) error {
 			return fmt.Errorf("%s: %s: %w", step.Name, name, err)
 		}
 	}
-	if isCommentAction(step.Kind) {
-		if err := validateCommentStep(step); err != nil {
-			return err
-		}
+	if err := validateInboxStep(step); err != nil {
+		return err
 	}
 	if err := validateHTTPAuthentication(step); err != nil {
 		return err
@@ -243,7 +246,7 @@ func validateTextBinding(text string, available map[string]bool, complete bool) 
 var requiredInputs = map[string][]string{
 	KindDraft: {"text"}, KindBuild: {"text"}, KindApproval: {"publication_id"}, KindSchedule: {"publication_id", "revision", "minutes"},
 	KindHTTP: {"url", "method"}, KindCode: {"code"}, KindAIText: {"text"}, KindAIDecision: {"text", "instructions"}, KindFields: {"fields"}, KindText: {"text", "operation"}, KindJSON: {"text"}, KindFilter: {"items", "field", "operator", "right"}, KindSort: {"items", "field"}, KindLimit: {"items", "limit"}, KindMerge: {"first", "second"}, KindDate: {"date", "format"}, KindURL: {"url", "campaign", "source", "medium"}, KindFeed: {"url"},
-	KindPrivateReply: {"engagement_id", "text", "delivery"}, KindCommentHandoff: {"engagement_id"}, KindCommentReply: {"engagement_id", "text", "delivery"}, KindReply: {"rendition_id", "text"}, KindWait: {"minutes"}, KindCondition: {"left", "operator", "right"}, KindMetrics: {"rendition_id"},
+	KindMessageReply: {"message_id", "text", "delivery"}, KindPrivateReply: {"engagement_id", "text", "delivery"}, KindCommentHandoff: {"engagement_id"}, KindCommentReply: {"engagement_id", "text", "delivery"}, KindReply: {"rendition_id", "text"}, KindWait: {"minutes"}, KindCondition: {"left", "operator", "right"}, KindMetrics: {"rendition_id"},
 }
 
 func validateRequiredInputs(step Step) error {
@@ -385,8 +388,9 @@ var stepOutputFields = map[string][]string{
 	KindURL:          {"url"},
 	KindSchedule:     {"publication_id", "job_id", "scheduled_at", "status", "renditions.*"},
 	KindPrivateReply: {"engagement_id", "job_id", "status", "text", "channel"}, KindCommentHandoff: {"engagement_id", "status"}, KindCommentReply: {"engagement_id", "job_id", "status", "text", "channel"},
-	KindReply: {"rendition_id", "job_id", "status"},
-	KindWait:  {"until"},
+	KindMessageReply: {"message_id", "conversation_id", "status", "text", "reason", "sent_message_id"},
+	KindReply:        {"rendition_id", "job_id", "status"},
+	KindWait:         {"until"},
 }
 
 func outputFields(step Step) []string {

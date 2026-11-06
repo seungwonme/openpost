@@ -203,6 +203,9 @@ func (s *Service) Approve(ctx context.Context, actor workspaceaccess.ActorFacts,
 	if err := s.db.NewSelect().Model(&record).Where("id = ? AND workspace_id = ?", id, workspaceID).Scan(ctx); err != nil {
 		return Run{}, ErrNotFound
 	}
+	if stopped, ok := messageRunStoppedDuringReview(record); ok {
+		return stopped, nil
+	}
 	if record.State != StateApproval || record.Revision != expected {
 		return Run{}, ErrState
 	}
@@ -224,7 +227,7 @@ func (s *Service) Approve(ctx context.Context, actor workspaceaccess.ActorFacts,
 	if s.actions == nil {
 		return Run{}, errors.New("native workflow actions are unavailable")
 	}
-	if step.Kind == KindCommentReply || step.Kind == KindPrivateReply {
+	if isReviewedReply(step.Kind) {
 		return s.approveCommentReply(ctx, actor, authority, record, run, index, replyText)
 	}
 
@@ -346,6 +349,9 @@ func (s *Service) approveCommentReply(ctx context.Context, actor workspaceaccess
 	effect, err := s.actions.Execute(ctx, EffectRequest{Kind: step.Kind, Inputs: inputs, Authority: authority, RunID: id, StepID: step.StepID})
 	if err != nil {
 		return Run{}, err
+	}
+	if reason, _ := effect.Output["reason"].(string); effect.Stop && isMessageAction(step.Kind) && reason != "" {
+		return s.failReviewedMessageRun(ctx, actor, record, reason)
 	}
 	if effect.Stop {
 		return s.Cancel(ctx, actor, workspaceID, id, expected)

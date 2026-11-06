@@ -2721,6 +2721,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/engagement/{id}/automation/opt-out/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove this comment author's opt-out from automatic messages and replies */
+        post: operations["remove-engagement-automation-opt-out"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/engagement/{id}/automation/stop": {
         parameters: {
             query?: never;
@@ -3980,6 +3997,74 @@ export interface paths {
         get: operations["list-conversation-messages"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/messages/{conversation_id}/automation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inspect automatic messages in a conversation */
+        get: operations["get-message-automation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/messages/{conversation_id}/automation/opt-out/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove this person's opt-out from automatic messages and replies */
+        post: operations["remove-message-automation-opt-out"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/messages/{conversation_id}/automation/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Let future messages in a conversation start automation again */
+        post: operations["resume-message-automation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/messages/{conversation_id}/automation/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Take over a conversation and stop automatic messages */
+        post: operations["stop-message-automation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7836,6 +7921,23 @@ export interface components {
             installation_id?: string;
             redirect_url: string;
         };
+        AutomationMessage: {
+            body: string;
+            conversation_id: string;
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            message_id?: string;
+            reason?: string;
+            run_id: string;
+            state: string;
+            step_id: string;
+            trigger_message_id: string;
+            /** Format: date-time */
+            updated_at: string;
+            workflow_id: string;
+            workspace_id: string;
+        };
         AutomationReply: {
             body: string;
             channel: string;
@@ -8771,6 +8873,27 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
             workspace_id: string;
+        };
+        ConversationAutomation: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/api/v1/schemas/ConversationAutomation.json
+             */
+            readonly $schema?: string;
+            /** Format: date-time */
+            lapsed_at?: string;
+            /** Format: date-time */
+            lapses_at?: string;
+            /** Format: date-time */
+            opt_out_removed_at?: string;
+            opt_out_removed_by?: string;
+            /** Format: date-time */
+            opted_out_at?: string;
+            replies: components["schemas"]["AutomationMessage"][] | null;
+            stop_reason?: string;
+            /** Format: date-time */
+            stopped_at?: string;
         };
         ConversationPage: {
             /**
@@ -10247,6 +10370,7 @@ export interface components {
             author_avatar_url: string;
             author_handle: string;
             author_name: string;
+            author_opted_out?: boolean;
             author_remote_id: string;
             automation_run_id?: string;
             automation_state?: string;
@@ -16325,6 +16449,19 @@ export interface components {
             /** @description Whether this request recorded the Workspace's first meaningful composition */
             claimed: boolean;
         };
+        State: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/api/v1/schemas/State.json
+             */
+            readonly $schema?: string;
+            /** Format: date-time */
+            opt_out_removed_at?: string;
+            opt_out_removed_by?: string;
+            /** Format: date-time */
+            opted_out_at?: string;
+        };
         Status: {
             /**
              * Format: uri
@@ -18049,7 +18186,7 @@ export interface components {
             interval_minutes?: number;
             keywords?: string[] | null;
             /** @enum {string} */
-            kind: "manual" | "github_release" | "rss" | "rendition_published" | "interval" | "publication_created" | "rendition_failed" | "comment_received";
+            kind: "manual" | "github_release" | "rss" | "rendition_published" | "interval" | "publication_created" | "rendition_failed" | "comment_received" | "message_received";
             /** @enum {string} */
             match_mode?: "word" | "exact" | "contains";
             post_ids?: string[] | null;
@@ -18066,9 +18203,11 @@ export interface components {
             account_id?: string;
             author_name?: string;
             body: string;
+            conversation_id?: string;
             created_at?: string;
             engagement_id?: string;
             id: string;
+            message_id?: string;
             platform?: string;
             publication_id?: string;
             published_at?: string;
@@ -18098,7 +18237,7 @@ export interface components {
                 [key: string]: components["schemas"]["WorkflowValue"];
             };
             /** @enum {string} */
-            kind: "create_draft" | "build_draft" | "approval" | "schedule" | "reply" | "comment_reply" | "private_comment_reply" | "comment_handoff" | "wait" | "condition" | "metrics" | "http_request" | "code" | "ai_text" | "ai_decision" | "set_fields" | "text" | "parse_json" | "list_filter" | "list_sort" | "list_limit" | "merge" | "date" | "tracking_link" | "read_feed";
+            kind: "create_draft" | "build_draft" | "approval" | "schedule" | "reply" | "comment_reply" | "private_comment_reply" | "comment_handoff" | "message_reply" | "wait" | "condition" | "metrics" | "http_request" | "code" | "ai_text" | "ai_decision" | "set_fields" | "text" | "parse_json" | "list_filter" | "list_sort" | "list_limit" | "merge" | "date" | "tracking_link" | "read_feed";
             name: string;
             then?: components["schemas"]["WorkflowStep"][] | null;
         };
@@ -28387,6 +28526,75 @@ export interface operations {
             };
         };
     };
+    "remove-engagement-automation-opt-out": {
+        parameters: {
+            query: {
+                workspace_id: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["State"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "stop-engagement-automation": {
         parameters: {
             query: {
@@ -33560,6 +33768,282 @@ export interface operations {
             };
             /** @description Error */
             default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-message-automation": {
+        parameters: {
+            query: {
+                workspace_id: string;
+            };
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationAutomation"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "remove-message-automation-opt-out": {
+        parameters: {
+            query: {
+                workspace_id: string;
+            };
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationAutomation"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "resume-message-automation": {
+        parameters: {
+            query: {
+                workspace_id: string;
+            };
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationAutomation"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "stop-message-automation": {
+        parameters: {
+            query: {
+                workspace_id: string;
+            };
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationAutomation"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

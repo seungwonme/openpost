@@ -50,6 +50,7 @@
 		(
 			[
 				'comment_received',
+				'message_received',
 				'manual',
 				'interval',
 				'github_release',

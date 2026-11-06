@@ -37,6 +37,7 @@ const (
 	KindCommentReply   = "comment_reply"
 	KindPrivateReply   = "private_comment_reply"
 	KindCommentHandoff = "comment_handoff"
+	KindMessageReply   = "message_reply"
 	KindWait           = "wait"
 	KindCondition      = "condition"
 	KindMetrics        = "metrics"
@@ -87,7 +88,7 @@ type WorkflowSource struct {
 	TopLevelOnly       bool     `json:"top_level_only,omitempty"`
 	DailyLimit         int      `json:"daily_limit,omitempty" minimum:"0" maximum:"1000"`
 	IntervalMinutes    int      `json:"interval_minutes,omitempty" minimum:"0" maximum:"43200"`
-	Kind               string   `json:"kind" enum:"manual,github_release,rss,rendition_published,interval,publication_created,rendition_failed,comment_received"`
+	Kind               string   `json:"kind" enum:"manual,github_release,rss,rendition_published,interval,publication_created,rendition_failed,comment_received,message_received"`
 	Repository         string   `json:"repository,omitempty" maxLength:"200"`
 	URL                string   `json:"url,omitempty" maxLength:"2048"`
 	ConnectionID       string   `json:"connection_id,omitempty"`
@@ -104,7 +105,7 @@ type WorkflowValue struct {
 
 type WorkflowStep struct {
 	ID     string           `json:"id" maxLength:"64"`
-	Kind   string           `json:"kind" enum:"create_draft,build_draft,approval,schedule,reply,comment_reply,private_comment_reply,comment_handoff,wait,condition,metrics,http_request,code,ai_text,ai_decision,set_fields,text,parse_json,list_filter,list_sort,list_limit,merge,date,tracking_link,read_feed"`
+	Kind   string           `json:"kind" enum:"create_draft,build_draft,approval,schedule,reply,comment_reply,private_comment_reply,comment_handoff,message_reply,wait,condition,metrics,http_request,code,ai_text,ai_decision,set_fields,text,parse_json,list_filter,list_sort,list_limit,merge,date,tracking_link,read_feed"`
 	Name   string           `json:"name" maxLength:"100"`
 	Inputs map[string]Value `json:"inputs"`
 	Then   []Step           `json:"then,omitempty" maxItems:"40"`
