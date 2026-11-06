@@ -42,6 +42,12 @@
 				: 3000
 	}));
 	const run = $derived(runQuery.data);
+	// A comment campaign learns its conversation when the person responds.
+	const conversationID = $derived(
+		run?.source.conversation_id ||
+			run?.steps?.find((step) => step.kind === 'message_sequence' && step.output?.conversation_id)
+				?.output?.conversation_id
+	);
 	let refreshedRun = '';
 	$effect(() => {
 		if (
@@ -163,9 +169,9 @@
 				{m.workflows_waiting()}: {new Date(run.wake_at).toLocaleString()}
 			</p>{/if}
 		{#if comment.data}<EngagementAutomation item={comment.data.item} />{/if}
-		{#if run.source.conversation_id}<MessageAutomation
+		{#if conversationID}<MessageAutomation
 				{workspaceID}
-				conversationID={String(run.source.conversation_id)}
+				conversationID={String(conversationID)}
 				{runID}
 			/>{/if}
 		{#if publicationID}
@@ -230,6 +236,11 @@
 								· {m.workflows_usage_cost({ amount: usage.data.cost_usd.toFixed(6) })}{/if}
 						</p>{/if}
 					{#if step.error}<p class="mt-3 text-sm text-destructive">{step.error}</p>{/if}
+					{#if (step.kind === 'message_sequence' || step.kind === 'message_reply') && step.output?.reason && !step.error}<p
+							class="mt-3 text-sm text-muted-foreground"
+						>
+							{step.output.reason}
+						</p>{/if}
 					{#if postID}<Button
 							class="mt-3"
 							size="sm"

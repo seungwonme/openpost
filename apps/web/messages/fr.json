@@ -10404,5 +10404,22 @@
 	"workflows_message_failed": "Message rejected. Nothing further was sent.",
 	"workflows_message_uncertain": "Delivery unconfirmed. OpenPost did not send it again.",
 	"workflows_message_not_sent": "Not sent",
-	"workflows_message_approve": "Approve message"
+	"workflows_message_approve": "Approve message",
+	"workflows_message_sequence_node": "Send follow-up messages",
+	"workflows_message_sequence_help": "After the person responds, send ordered messages within 24 hours of that response. Window, opt-out and takeover are checked before each one.",
+	"workflows_message_sequence_messages": "Follow-up messages",
+	"workflows_message_sequence_item": "Message {number}",
+	"workflows_message_sequence_position": "Message {number} of {total}",
+	"workflows_message_sequence_delay": "Delay in minutes",
+	"workflows_message_sequence_delay_help": "The first delay counts from the person's response. Later delays count from the previous message.",
+	"workflows_message_sequence_limits": "Add between 1 and 5 messages. Each needs text within 1,000 bytes and a whole-minute delay under 24 hours.",
+	"workflows_message_sequence_add": "Add message",
+	"workflows_message_sequence_remove": "Remove message",
+	"workflows_message_sequence_up": "Move up",
+	"workflows_message_sequence_down": "Move down",
+	"workflows_message_sequence_private": "A follow-up needs a private reply earlier in this path.",
+	"workflows_message_sequence_source": "Follow-ups need the comment or incoming message trigger.",
+	"workflows_message_sequence_once": "A run answers one message once. Use one reply or sequence on each path.",
+	"workflows_message_response_window": "Wait for a response (minutes, up to 7 days)",
+	"workflows_message_scheduled": "Scheduled for {time}"
 }

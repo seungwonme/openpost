@@ -34,7 +34,8 @@
 		findStep,
 		newStep,
 		runStateLabel,
-		sourceLabel
+		sourceLabel,
+		messageSequenceInputs
 	} from './catalog';
 	import Disclosure from '$lib/components/disclosure.svelte';
 	import Canvas from './canvas.svelte';
@@ -313,6 +314,8 @@
 					siblings.splice(index + 1, 0, ...steps);
 				});
 			else next.definition.steps.unshift(...steps);
+			if (kind === 'message_sequence')
+				added.inputs = messageSequenceInputs(next.definition.source.kind);
 			const available = availableReferences(next.definition.steps, added.id);
 			const previousPost = available
 				.filter((item) => item.value.endsWith('.publication_id') || item.value.endsWith('.id'))

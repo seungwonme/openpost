@@ -28,15 +28,17 @@
 	const stateLabel = $derived(
 		reply.state === 'awaiting_review'
 			? m.workflows_comment_pending()
-			: reply.state === 'sent'
-				? m.workflows_message_sent()
-				: reply.state === 'failed'
-					? m.workflows_message_failed()
-					: reply.state === 'uncertain'
-						? m.workflows_message_uncertain()
-						: reply.state === 'cancelled' || reply.state === 'skipped'
-							? m.workflows_message_not_sent()
-							: m.workflows_comment_sending()
+			: reply.state === 'scheduled' && reply.not_before
+				? m.workflows_message_scheduled({ time: new Date(reply.not_before).toLocaleString() })
+				: reply.state === 'sent'
+					? m.workflows_message_sent()
+					: reply.state === 'failed'
+						? m.workflows_message_failed()
+						: reply.state === 'uncertain'
+							? m.workflows_message_uncertain()
+							: reply.state === 'cancelled' || reply.state === 'skipped'
+								? m.workflows_message_not_sent()
+								: m.workflows_comment_sending()
 	);
 	async function approve() {
 		const captured = reply;
@@ -60,6 +62,12 @@
 </script>
 
 <div class="space-y-2">
+	{#if reply.sequence_length}<p class="text-xs text-muted-foreground">
+			{m.workflows_message_sequence_position({
+				number: reply.sequence_position + 1,
+				total: reply.sequence_length
+			})}
+		</p>{/if}
 	<p class="text-xs font-medium">{stateLabel}</p>
 	{#if reply.reason}<p class="text-xs text-muted-foreground" dir="auto">{reply.reason}</p>{/if}
 	{#if reply.state === 'awaiting_review'}<Label for={`message-reply-${reply.id}`}

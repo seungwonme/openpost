@@ -19,6 +19,7 @@ export function actionCategory(kind: Step['kind']): NodeCategory {
 			'private_comment_reply',
 			'comment_handoff',
 			'message_reply',
+			'message_sequence',
 			'metrics'
 		].includes(kind)
 	)
@@ -53,6 +54,12 @@ export function actionCatalog(): {
 			kind: 'message_reply',
 			label: m.workflows_message_reply_node(),
 			description: m.workflows_message_reply_help(),
+			icon: 'communications'
+		},
+		{
+			kind: 'message_sequence',
+			label: m.workflows_message_sequence_node(),
+			description: m.workflows_message_sequence_help(),
 			icon: 'communications'
 		},
 		{
@@ -280,6 +287,7 @@ export function newStep(kind: Step['kind']): Step {
 			text: literal(''),
 			delivery: literal('review')
 		});
+	if (kind === 'message_sequence') Object.assign(inputs, messageSequenceInputs('message_received'));
 	if (kind === 'comment_handoff') inputs.engagement_id = reference('source.engagement_id');
 	if (kind === 'comment_reply')
 		Object.assign(inputs, {
@@ -598,6 +606,21 @@ export function commentTemplates() {
 			}
 		}
 	] satisfies { id: string; name: string; description: string; definition: Definition }[];
+}
+
+/** A sequence answers the triggering message, or a response to a comment's private reply. */
+export function messageSequenceInputs(source: Definition['source']['kind']): Step['inputs'] {
+	const shared = {
+		messages: literal([{ text: '', delay_minutes: 0 }]),
+		delivery: literal('review')
+	};
+	return source === 'comment_received'
+		? {
+				engagement_id: reference('source.engagement_id'),
+				response_window_minutes: literal(10080),
+				...shared
+			}
+		: { message_id: reference('source.message_id'), ...shared };
 }
 
 function messageTemplates() {

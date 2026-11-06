@@ -3,7 +3,7 @@ import { referenceTokens, referenceParts } from './reference-path';
 import type { Definition, Value, Step, WorkflowData } from './api';
 import { createAvailableReferences } from './catalog';
 import { stepFields, type FieldSpec, type Reference } from './fields';
-import { messageDelayIssues, messageSourceIssues } from './message-validation';
+import { messageActionIssues, messageSourceIssues } from './message-validation';
 import { m } from '$lib/paraglide/messages';
 export type Issue = { node: string; field: string; message: string };
 export function referenceExists(reference: string, references: Reference[]): boolean {
@@ -60,7 +60,7 @@ export function workflowIssues(definition: Definition, sourceData?: WorkflowData
 				? 'interval_minutes'
 				: '';
 	issues.push(...messageSourceIssues(source));
-	issues.push(...messageDelayIssues(definition));
+	issues.push(...messageActionIssues(definition));
 	if (source.kind === 'comment_received') {
 		if (!source.account_ids?.length)
 			issues.push({ node: 'source', field: 'account_ids', message: m.workflows_required() });

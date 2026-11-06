@@ -15,6 +15,7 @@ import (
 	"github.com/openpost/backend/internal/jobregistry"
 	"github.com/openpost/backend/internal/models"
 	"github.com/openpost/backend/internal/platform"
+	"github.com/openpost/backend/internal/services/engagement"
 	"github.com/openpost/backend/internal/services/messaging"
 	"github.com/openpost/backend/internal/services/workflows"
 	"github.com/openpost/backend/internal/services/workspaceaccess"
@@ -326,6 +327,113 @@ func TestDMAutomationHTTPTakeoverAndResume(t *testing.T) {
 	assert.Nil(t, state.StoppedAt)
 }
 
+func dmSequenceStep(delivery string) workflows.Step {
+	return workflows.Step{ID: "sequence", Kind: workflows.KindMessageSequence, Name: "Follow up", Inputs: map[string]workflows.Value{"message_id": {Reference: "source.message_id"}, "messages": {Literal: `[{"text":"First, {{source.author_name}}","delay_minutes":0},{"text":"Second","delay_minutes":0}]`}, "delivery": {Literal: delivery}}}
+}
+
+func (h *dmHarness) startSequence(t *testing.T) string {
+	t.Helper()
+	// A first message has no delay here, so it must not be dated in the future.
+	time.Sleep(5 * time.Millisecond)
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.1", "inbound", "reader", "guide", time.Now().UTC())))
+	h.poll(t)
+	require.Len(t, h.runs(t), 1)
+	return h.runs(t)[0].ID
+}
+
+func TestDMSequenceRunSendsEachMessageOnce(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmSequenceStep("automatic")})
+	runID := h.startSequence(t)
+	require.Equal(t, workflows.StateWaiting, h.advance(t, runID).State)
+	h.sendQueued(t)
+	require.Len(t, *h.sent, 1)
+	assert.Equal(t, "First, Sample reader", (*h.sent)[0].Body)
+	require.Equal(t, workflows.StateWaiting, h.advance(t, runID).State)
+	h.sendQueued(t)
+	require.Len(t, *h.sent, 2)
+	assert.Equal(t, "Second", (*h.sent)[1].Body)
+	run := h.advance(t, runID)
+	require.Equal(t, workflows.StateSucceeded, run.State)
+	assert.EqualValues(t, 2, run.Steps[0].Output["sent"])
+	assert.Equal(t, "sent", run.Steps[0].Output["status"])
+	assert.Len(t, *h.sent, 2)
+}
+
+func TestDMSequenceReviewResumesTheSameStep(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmSequenceStep("review")})
+	runID := h.startSequence(t)
+	run := h.advance(t, runID)
+	require.Equal(t, workflows.StateApproval, run.State)
+	run, err := h.service.Approve(t.Context(), h.actor, "ws", run.ID, run.Revision, 0, "Edited first")
+	require.NoError(t, err)
+	require.Equal(t, workflows.StateQueued, run.State)
+	require.Equal(t, workflows.StateWaiting, h.advance(t, runID).State)
+	h.sendQueued(t)
+	require.Len(t, *h.sent, 1)
+	assert.Equal(t, "Edited first", (*h.sent)[0].Body)
+
+	run = h.advance(t, runID)
+	require.Equal(t, workflows.StateApproval, run.State, "the next position waits for its own review")
+	assert.Equal(t, "Second", run.Steps[0].Output["text"])
+	run, err = h.service.Approve(t.Context(), h.actor, "ws", run.ID, run.Revision, 0)
+	require.NoError(t, err)
+	require.Equal(t, workflows.StateWaiting, h.advance(t, run.ID).State)
+	h.sendQueued(t)
+	require.Len(t, *h.sent, 2)
+	assert.Equal(t, "Second", (*h.sent)[1].Body, "approving without text does not reuse the earlier edit")
+	assert.Equal(t, workflows.StateSucceeded, h.advance(t, runID).State)
+}
+
+func TestDMSequenceTakeoverCancelsTheRunWithItsReason(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmSequenceStep("automatic")})
+	runID := h.startSequence(t)
+	h.advance(t, runID)
+	h.sendQueued(t)
+	require.Len(t, *h.sent, 1)
+	require.NoError(t, h.inbox.StopConversationAutomation(t.Context(), messaging.Actor{UserID: "user"}, "ws", h.conversationID(t)))
+	run, err := h.service.GetRun(t.Context(), h.actor, "ws", runID)
+	require.NoError(t, err)
+	assert.Equal(t, workflows.StateCancelled, run.State)
+	assert.NotEmpty(t, run.Error)
+	h.sendQueued(t)
+	assert.Len(t, *h.sent, 1)
+}
+
+func TestDMSequenceOptOutMessageEndsTheRun(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmSequenceStep("automatic")})
+	runID := h.startSequence(t)
+	h.advance(t, runID)
+	h.sendQueued(t)
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.2", "inbound", "reader", "수신거부", time.Now().UTC().Add(2*time.Second))))
+	run, err := h.service.GetRun(t.Context(), h.actor, "ws", runID)
+	require.NoError(t, err)
+	assert.Equal(t, workflows.StateCancelled, run.State)
+	assert.NotEmpty(t, run.Error)
+	h.sendQueued(t)
+	assert.Len(t, *h.sent, 1)
+}
+
+func (h *dmHarness) conversationID(t *testing.T) string {
+	t.Helper()
+	var id string
+	require.NoError(t, h.db.NewSelect().Model((*models.Conversation)(nil)).Column("id").Limit(1).Scan(t.Context(), &id))
+	return id
+}
+
+func TestCommentFollowUpEffectNeedsADeliveredPrivateReply(t *testing.T) {
+	db := workflowHandlerDB(t)
+	now := time.Now().UTC()
+	_, err := db.NewInsert().Model(&models.SocialAccount{ID: "ig", WorkspaceID: "ws", Platform: "instagram", AccountID: "owner", Slug: "ig", AccessTokenEnc: []byte("token"), IsActive: true, CreatedAt: now}).Exec(t.Context())
+	require.NoError(t, err)
+	_, err = db.NewInsert().Model(&models.EngagementItem{ID: "comment", WorkspaceID: "ws", SocialAccountID: "ig", RemoteID: "remote", Body: "guide", AuthorRemoteID: "reader", Platform: "instagram", RemoteCreatedAt: now, CreatedAt: now, UpdatedAt: now}).Exec(t.Context())
+	require.NoError(t, err)
+	inbox := messaging.NewService(db, dmToken{}, nil)
+	inbox.SetFeatureGate(dmGate{})
+	actions := NewWorkflowActionsWithInbox(NewPublicationHandler(db, workflowSession{}, nil), nil, nil, engagement.NewService(db, nil, nil), inbox)
+	_, err = actions.Execute(t.Context(), workflows.EffectRequest{Kind: workflows.KindMessageSequence, RunID: "run", StepID: "sequence", Authority: workspaceaccess.StoredAuthority{UserID: "user", WorkspaceID: "ws", OrganizationID: "org", AssuredAt: now}, Inputs: map[string]any{"engagement_id": "comment", "messages": `[{"text":"Hi"}]`, "delivery": "automatic", "workflow_id": "wf"}})
+	require.ErrorIs(t, err, engagement.ErrNoDeliveredPrivateReply)
+}
+
 func TestDMHumanReplyWithNoRunStopsLaterAdmission(t *testing.T) {
 	h := newDMHarness(t, []workflows.Step{dmReplyStep("automatic")})
 	now := time.Now().UTC().Add(time.Second)
@@ -382,6 +490,35 @@ func TestDMApprovalDuringAHumanReplyReturnsTheOutcome(t *testing.T) {
 	assert.Equal(t, workflows.StateCancelled, stopped.State)
 	assert.NotEmpty(t, stopped.Error)
 	assert.Empty(t, *h.sent)
+}
+
+func TestDMFiveShortMessagesGetOneSequence(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmSequenceStep("automatic")})
+	time.Sleep(5 * time.Millisecond)
+	now := time.Now().UTC()
+	for i, id := range []string{"mid.1", "mid.2", "mid.3", "mid.4", "mid.5"} {
+		require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent(id, "inbound", "reader", "guide", now.Add(-time.Duration(5-i)*time.Millisecond))))
+	}
+	h.poll(t)
+	runs := h.runs(t)
+	require.Len(t, runs, 5)
+	for range 4 {
+		for _, run := range runs {
+			h.advance(t, run.ID)
+		}
+		h.sendQueued(t)
+	}
+	assert.Len(t, *h.sent, 2, "one sequence, not five")
+	skipped := 0
+	for _, run := range h.runs(t) {
+		current, err := h.service.GetRun(t.Context(), h.actor, "ws", run.ID)
+		require.NoError(t, err)
+		assert.Equal(t, workflows.StateSucceeded, current.State, "a skipped trigger is not a failure")
+		if current.Steps[0].Output["reason"] == messaging.StopReasonSequenceActive {
+			skipped++
+		}
+	}
+	assert.Equal(t, 4, skipped)
 }
 
 func TestDMApprovalAfterAnEchoTookOverReturnsTheOutcome(t *testing.T) {
@@ -468,4 +605,70 @@ func (h *dmHarness) igConversation(t *testing.T) string {
 	var id string
 	require.NoError(t, h.db.NewSelect().Model((*models.Conversation)(nil)).Column("id").Where("social_account_id = 'ig'").Scan(t.Context(), &id))
 	return id
+}
+
+func TestDMSenderLimitStopsSequenceRunsThatFailOrSkip(t *testing.T) {
+	five := dmSequenceStep("automatic")
+	five.Inputs["messages"] = workflows.Value{Literal: `[{"text":"1","delay_minutes":0},{"text":"2","delay_minutes":0},{"text":"3","delay_minutes":0},{"text":"4","delay_minutes":0},{"text":"5","delay_minutes":0}]`}
+	h := newDMHarness(t, []workflows.Step{five})
+	base := time.Now().UTC()
+	started := map[string]bool{}
+	for i := range 8 {
+		require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent(fmt.Sprintf("mid.%d", i), "inbound", "reader", "guide", base.Add(time.Duration(i)*time.Second))))
+		h.poll(t)
+		for _, run := range h.runs(t) {
+			if started[run.ID] || run.State != workflows.StateQueued {
+				continue
+			}
+			started[run.ID] = true
+			current := run
+			for range 8 {
+				current = h.advance(t, current.ID)
+				if current.State != workflows.StateWaiting && current.State != workflows.StateQueued && current.State != workflows.StateRunning {
+					break
+				}
+				h.sendQueued(t)
+			}
+		}
+	}
+	assert.Len(t, started, 5, "later runs fail or skip, and they still count")
+	assert.Len(t, *h.sent, 5)
+	runs := h.runs(t)
+	require.Len(t, runs, 8, "every message is accounted for")
+	limited := 0
+	for _, run := range runs {
+		if !started[run.ID] {
+			limited++
+			assert.Equal(t, workflows.StateCancelled, run.State)
+			assert.Contains(t, run.Error, "daily limit")
+			assert.Empty(t, run.Steps, "no step ran")
+		}
+	}
+	assert.Equal(t, 3, limited)
+}
+
+func TestDMExpiredSequenceApprovalStopsBlockingTheNextTrigger(t *testing.T) {
+	h := newDMHarness(t, []workflows.Step{dmSequenceStep("review")})
+	run := h.advance(t, h.startSequence(t))
+	require.Equal(t, workflows.StateApproval, run.State)
+	conversation := h.igConversation(t)
+	_, err := h.db.NewUpdate().Model((*models.Conversation)(nil)).Set("messaging_window_expires_at = ?", time.Now().UTC().Add(-time.Minute)).Where("id = ?", conversation).Exec(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, h.service.HandleJob(t.Context(), jobregistry.TypeWorkflowSweep, "{}"))
+	ended, err := h.service.GetRun(t.Context(), h.actor, "ws", run.ID)
+	require.NoError(t, err)
+	require.Equal(t, workflows.StateCancelled, ended.State)
+	require.Contains(t, ended.Error, "messaging window closed")
+
+	time.Sleep(5 * time.Millisecond)
+	require.NoError(t, h.inbox.ApplyProviderEvents(t.Context(), "ig", dmEvent("mid.next", "inbound", "reader", "guide", time.Now().UTC())))
+	h.poll(t)
+	var next workflows.Run
+	for _, candidate := range h.runs(t) {
+		if candidate.ID != run.ID {
+			next = candidate
+		}
+	}
+	require.NotEmpty(t, next.ID)
+	require.Equal(t, workflows.StateApproval, h.advance(t, next.ID).State, "the next message starts its own sequence")
 }

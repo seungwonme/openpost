@@ -32,7 +32,9 @@
 		(automation.data?.replies ?? []).filter((reply) => !runID || reply.run_id === runID)
 	);
 	const active = $derived(
-		replies.some((reply) => ['awaiting_review', 'ready', 'sending'].includes(reply.state))
+		replies.some((reply) =>
+			['scheduled', 'awaiting_review', 'ready', 'sending'].includes(reply.state)
+		)
 	);
 	const visible = $derived(
 		Boolean(

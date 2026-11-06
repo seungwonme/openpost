@@ -84,6 +84,12 @@ func (s *Service) sweep(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := s.wakeRespondedRuns(ctx, now); err != nil {
+		return err
+	}
+	if err := s.endLateMessageApprovals(ctx, now); err != nil {
+		return err
+	}
 	// Recover a run whose checkpoint committed but whose queue job exhausted
 	// infrastructure retries. Native effects retain the same idempotency key.
 	runs := []runRecord{}
@@ -210,7 +216,7 @@ func (s *Service) commitSourcePoll(ctx context.Context, record workflowRecord, d
 		if n, _ := current.RowsAffected(); n != 1 {
 			return nil
 		}
-		active, err := tx.NewSelect().Model((*runRecord)(nil)).Where("workspace_id = ? AND state IN (?)", record.WorkspaceID, bun.List([]string{StateQueued, StateRunning, StateWaiting, StateApproval})).Count(ctx)
+		active, err := countActiveRuns(ctx, tx, record.WorkspaceID)
 		if err != nil {
 			return err
 		}

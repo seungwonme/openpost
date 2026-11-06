@@ -54,7 +54,7 @@ func (s *Service) admitRun(ctx context.Context, record workflowRecord, definitio
 		if err := organizationguard.LockWorkspace(ctx, tx, workspaceID); err != nil {
 			return err
 		}
-		count, err := tx.NewSelect().Model((*runRecord)(nil)).Where("workspace_id = ? AND state IN (?)", workspaceID, bun.List([]string{StateQueued, StateRunning, StateWaiting, StateApproval})).Count(ctx)
+		count, err := countActiveRuns(ctx, tx, workspaceID)
 		if err != nil {
 			return err
 		}
@@ -356,7 +356,7 @@ func (s *Service) approveCommentReply(ctx context.Context, actor workspaceaccess
 	if effect.Stop {
 		return s.Cancel(ctx, actor, workspaceID, id, expected)
 	}
-	step.Inputs["text"] = effect.Output["text"]
+	keepReviewedText(&step, effect)
 	step.Output = effect.Output
 	step.State = StateQueued
 	run.Steps[index] = step

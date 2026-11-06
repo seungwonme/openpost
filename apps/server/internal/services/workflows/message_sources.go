@@ -38,7 +38,7 @@ func isInteractionSource(kind string) bool {
 }
 
 func isMessageAction(kind string) bool {
-	return kind == KindMessageReply
+	return kind == KindMessageReply || kind == KindMessageSequence
 }
 
 func isInboxAction(kind string) bool {
@@ -52,6 +52,9 @@ func isReviewedReply(kind string) bool {
 func validateInboxStep(step Step) error {
 	if isCommentAction(step.Kind) {
 		return validateCommentStep(step)
+	}
+	if step.Kind == KindMessageSequence {
+		return validateMessageSequenceStep(step)
 	}
 	if isMessageAction(step.Kind) {
 		return validateMessageStep(step)
@@ -243,52 +246,68 @@ func validateMessageStep(step Step) error {
 // provider window can never accommodate.
 func validateMessageAutomation(def Definition) error {
 	walker := messageStepWalker{source: def.Source}
-	_, err := walker.walk(def.Steps, 0)
+	_, err := walker.walk(def.Steps, messagePath{})
 	return err
 }
 
 type messageStepWalker struct{ source Source }
 
-func (w messageStepWalker) walk(steps []Step, elapsed float64) (float64, error) {
-	for _, step := range steps {
-		if step.Kind == KindWait {
-			if minutes, err := number(step.Inputs["minutes"].Literal); step.Inputs["minutes"].Reference == "" && err == nil {
-				elapsed += minutes
-			}
-		}
-		if isMessageAction(step.Kind) {
-			if err := w.validateSend(step, elapsed); err != nil {
-				return elapsed, err
-			}
-		}
-		yes, err := w.walk(step.Then, elapsed)
-		if err != nil {
-			return elapsed, err
-		}
-		no, err := w.walk(step.Else, elapsed)
-		if err != nil {
-			return elapsed, err
-		}
-		elapsed = max(elapsed, yes, no)
-	}
-	return elapsed, nil
+// messagePath is what is known about every run reaching a step.
+type messagePath struct {
+	elapsed  float64
+	private  bool
+	answered bool
 }
 
-func (w messageStepWalker) validateSend(step Step, elapsed float64) error {
+func (w messageStepWalker) walk(steps []Step, path messagePath) (messagePath, error) {
+	for _, step := range steps {
+		switch {
+		case step.Kind == KindWait:
+			if minutes, err := number(step.Inputs["minutes"].Literal); step.Inputs["minutes"].Reference == "" && err == nil {
+				path.elapsed += minutes
+			}
+		case step.Kind == KindPrivateReply || (step.Kind == KindCommentReply && step.Inputs["channel"].Literal == "private"):
+			path.private = true
+		case isMessageAction(step.Kind):
+			if err := w.validateSend(step, path); err != nil {
+				return path, err
+			}
+			path.answered = true
+		}
+		yes, err := w.walk(step.Then, path)
+		if err != nil {
+			return path, err
+		}
+		no, err := w.walk(step.Else, path)
+		if err != nil {
+			return path, err
+		}
+		path = messagePath{elapsed: max(yes.elapsed, no.elapsed), private: yes.private && no.private, answered: yes.answered || no.answered}
+	}
+	return path, nil
+}
+
+func (w messageStepWalker) validateSend(step Step, path messagePath) error {
+	if path.answered {
+		return invalid(step.Name + ": a run answers one message once, so use one reply or sequence on each path")
+	}
+	if step.Kind == KindMessageSequence {
+		return w.validateSequence(step, path)
+	}
 	if w.source.Kind != "message_received" {
 		return invalid(step.Name + ": message replies need the incoming message trigger")
 	}
 	if step.Inputs["message_id"].Reference != "source.message_id" {
 		return invalid(step.Name + ": a message reply must answer the message that started this run")
 	}
-	if elapsed >= messageWindowMinutes {
+	if path.elapsed >= messageWindowMinutes {
 		return invalid(step.Name + ": this delay outlasts Instagram's 24 hour messaging window")
 	}
 	return nil
 }
 
 func (s *Service) validateMessageAutomationAccess(ctx context.Context, authority workspaceaccess.StoredAuthority, definition Definition) error {
-	if definition.Source.Kind != "message_received" {
+	if definition.Source.Kind != "message_received" && !messageResponseSteps(definition.Steps) {
 		return nil
 	}
 	validator, ok := s.actions.(MessageSourceValidator)
@@ -313,21 +332,27 @@ func (s *Service) CancelMessageAutomationRuns(ctx context.Context, tx bun.Tx, wo
 			if len(ids) > 0 {
 				q = q.WhereOr("id IN (?)", bun.List(ids))
 			}
-			return q
+			// A comment campaign waiting for this person has no source conversation yet.
+			return q.WhereOr("id IN (SELECT w.run_id FROM message_sequence_waits w JOIN conversations c ON c.social_account_id = w.account_id AND c.counterpart_remote_id = w.author_remote_id WHERE c.id = ?)", conversationID)
 		})
 	if err := query.Scan(ctx); err != nil {
 		return err
 	}
 	for _, run := range runs {
-		if _, err := tx.NewUpdate().Model(&run).Set("state = ?, error = ?, revision = revision + 1, wake_at = NULL, updated_at = ?", StateCancelled, reason, time.Now().UTC()).WherePK().Exec(ctx); err != nil {
+		if err := s.cancelMessageRun(ctx, tx, run, reason); err != nil {
 			return err
 		}
-		if step, ok := parkedApproval(decodeRunResults(run)); ok {
-			run.State = StateCancelled
-			if err := s.enqueueApprovalNotice(ctx, tx, run, step.StepID, "resolved"); err != nil {
-				return err
-			}
-		}
+	}
+	return nil
+}
+
+func (s *Service) cancelMessageRun(ctx context.Context, tx bun.Tx, run runRecord, reason string) error {
+	if _, err := tx.NewUpdate().Model(&run).Set("state = ?, error = ?, revision = revision + 1, wake_at = NULL, updated_at = ?", StateCancelled, reason, time.Now().UTC()).WherePK().Exec(ctx); err != nil {
+		return err
+	}
+	if step, ok := parkedApproval(decodeRunResults(run)); ok {
+		run.State = StateCancelled
+		return s.enqueueApprovalNotice(ctx, tx, run, step.StepID, "resolved")
 	}
 	return nil
 }

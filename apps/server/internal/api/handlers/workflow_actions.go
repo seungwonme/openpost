@@ -52,6 +52,8 @@ func (a workflowActions) Execute(ctx context.Context, input workflows.EffectRequ
 		return a.commentReply(ctx, input)
 	case workflows.KindMessageReply:
 		return a.messageReply(ctx, input)
+	case workflows.KindMessageSequence:
+		return a.messageSequence(ctx, input)
 	case workflows.KindReply:
 		output, err = a.reply(ctx, input)
 	case workflows.KindMetrics:

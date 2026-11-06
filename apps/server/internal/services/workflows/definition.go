@@ -102,7 +102,7 @@ func (v *definitionValidator) walk(steps []Step, available map[string]bool, dept
 	return nil
 }
 func validateStep(step Step, available map[string]bool, complete bool) error {
-	if !slices.Contains([]string{KindDraft, KindBuild, KindApproval, KindSchedule, KindReply, KindCommentReply, KindPrivateReply, KindCommentHandoff, KindMessageReply, KindWait, KindCondition, KindMetrics, KindHTTP, KindCode, KindAIText, KindAIDecision, KindFields, KindText, KindJSON, KindFilter, KindSort, KindLimit, KindMerge, KindDate, KindURL, KindFeed}, step.Kind) {
+	if !slices.Contains([]string{KindDraft, KindBuild, KindApproval, KindSchedule, KindReply, KindCommentReply, KindPrivateReply, KindCommentHandoff, KindMessageReply, KindMessageSequence, KindWait, KindCondition, KindMetrics, KindHTTP, KindCode, KindAIText, KindAIDecision, KindFields, KindText, KindJSON, KindFilter, KindSort, KindLimit, KindMerge, KindDate, KindURL, KindFeed}, step.Kind) {
 		return invalid("unsupported step kind")
 	}
 	if len(step.Name) > 100 || len(step.Inputs) > 20 {
@@ -246,7 +246,8 @@ func validateTextBinding(text string, available map[string]bool, complete bool) 
 var requiredInputs = map[string][]string{
 	KindDraft: {"text"}, KindBuild: {"text"}, KindApproval: {"publication_id"}, KindSchedule: {"publication_id", "revision", "minutes"},
 	KindHTTP: {"url", "method"}, KindCode: {"code"}, KindAIText: {"text"}, KindAIDecision: {"text", "instructions"}, KindFields: {"fields"}, KindText: {"text", "operation"}, KindJSON: {"text"}, KindFilter: {"items", "field", "operator", "right"}, KindSort: {"items", "field"}, KindLimit: {"items", "limit"}, KindMerge: {"first", "second"}, KindDate: {"date", "format"}, KindURL: {"url", "campaign", "source", "medium"}, KindFeed: {"url"},
-	KindMessageReply: {"message_id", "text", "delivery"}, KindPrivateReply: {"engagement_id", "text", "delivery"}, KindCommentHandoff: {"engagement_id"}, KindCommentReply: {"engagement_id", "text", "delivery"}, KindReply: {"rendition_id", "text"}, KindWait: {"minutes"}, KindCondition: {"left", "operator", "right"}, KindMetrics: {"rendition_id"},
+	KindMessageSequence: {"messages", "delivery"},
+	KindMessageReply:    {"message_id", "text", "delivery"}, KindPrivateReply: {"engagement_id", "text", "delivery"}, KindCommentHandoff: {"engagement_id"}, KindCommentReply: {"engagement_id", "text", "delivery"}, KindReply: {"rendition_id", "text"}, KindWait: {"minutes"}, KindCondition: {"left", "operator", "right"}, KindMetrics: {"rendition_id"},
 }
 
 func validateRequiredInputs(step Step) error {
@@ -388,9 +389,10 @@ var stepOutputFields = map[string][]string{
 	KindURL:          {"url"},
 	KindSchedule:     {"publication_id", "job_id", "scheduled_at", "status", "renditions.*"},
 	KindPrivateReply: {"engagement_id", "job_id", "status", "text", "channel"}, KindCommentHandoff: {"engagement_id", "status"}, KindCommentReply: {"engagement_id", "job_id", "status", "text", "channel"},
-	KindMessageReply: {"message_id", "conversation_id", "status", "text", "reason", "sent_message_id"},
-	KindReply:        {"rendition_id", "job_id", "status"},
-	KindWait:         {"until"},
+	KindMessageReply:    {"message_id", "conversation_id", "status", "text", "reason", "sent_message_id"},
+	KindMessageSequence: {"message_id", "conversation_id", "status", "text", "reason", "sent_message_id", "sent", "total"},
+	KindReply:           {"rendition_id", "job_id", "status"},
+	KindWait:            {"until"},
 }
 
 func outputFields(step Step) []string {
@@ -444,7 +446,7 @@ func isEmptyText(value any) bool {
 }
 
 func jsonInput(kind, field string) bool {
-	return kind == KindFields && field == "fields" || kind == KindHTTP && (field == "headers" || field == "query") || kind == KindCode && field == "data" || slices.Contains([]string{KindFilter, KindSort, KindLimit}, kind) && field == "items" || kind == KindMerge && (field == "first" || field == "second")
+	return kind == KindFields && field == "fields" || kind == KindHTTP && (field == "headers" || field == "query") || kind == KindCode && field == "data" || slices.Contains([]string{KindFilter, KindSort, KindLimit}, kind) && field == "items" || kind == KindMerge && (field == "first" || field == "second") || kind == KindMessageSequence && field == "messages"
 }
 
 func validateCommentSource(source Source) error {

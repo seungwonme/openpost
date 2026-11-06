@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/openpost/backend/internal/services/workspaceaccess"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
 )
 
 type messageSourceFixture struct {
@@ -190,6 +192,63 @@ func replyStep() Step {
 
 func waitStep(id string, minutes any) Step {
 	return Step{ID: id, Kind: KindWait, Name: "Wait", Inputs: map[string]Value{"minutes": literal(minutes)}}
+}
+
+func sequenceStep(messages any, inputs map[string]Value) Step {
+	step := Step{ID: "sequence", Kind: KindMessageSequence, Name: "Follow up", Inputs: map[string]Value{"messages": literal(messages), "delivery": literal("review")}}
+	for name, value := range inputs {
+		step.Inputs[name] = value
+	}
+	return step
+}
+
+func TestMessageSequenceValidation(t *testing.T) {
+	message := messageSource()
+	comment := Source{Kind: "comment_received", AccountIDs: []string{"ig"}, Keywords: []string{"guide"}, MatchMode: "word", DailyLimit: 20}
+	private := Step{ID: "private", Kind: KindPrivateReply, Name: "Private", Inputs: map[string]Value{"engagement_id": reference("source.engagement_id"), "text": literal("Hi"), "delivery": literal("review")}}
+	fromMessage := map[string]Value{"message_id": reference("source.message_id")}
+	fromComment := map[string]Value{"engagement_id": reference("source.engagement_id")}
+	two := `[{"text":"One","delay_minutes":0},{"text":"Two","delay_minutes":60}]`
+	cases := []struct {
+		name   string
+		source Source
+		steps  []Step
+		want   string
+	}{
+		{"answers the triggering message", message, []Step{sequenceStep(two, fromMessage)}, ""},
+		{"accepts a stored list", message, []Step{sequenceStep([]any{map[string]any{"text": "One", "delay_minutes": float64(5)}}, fromMessage)}, ""},
+		{"continues a private reply", comment, []Step{private, sequenceStep(two, fromComment)}, ""},
+		{"needs an earlier private reply", comment, []Step{sequenceStep(two, fromComment)}, "private reply earlier"},
+		{"a private reply on one branch is not enough", comment, []Step{{ID: "branch", Kind: KindCondition, Name: "If", Inputs: map[string]Value{"left": literal("a"), "operator": literal("equals"), "right": literal("a")}, Then: []Step{private}}, sequenceStep(two, fromComment)}, "private reply earlier"},
+		{"cannot target another message", message, []Step{sequenceStep(two, map[string]Value{"message_id": literal("someone-else")})}, "started this run"},
+		{"cannot target another comment", comment, []Step{private, sequenceStep(two, map[string]Value{"engagement_id": literal("someone-else")})}, "started this run"},
+		{"no other trigger can start one", Source{Kind: "manual"}, []Step{sequenceStep(two, fromMessage)}, "comment or incoming message"},
+		{"delays that outlast the window", message, []Step{sequenceStep(`[{"text":"One","delay_minutes":800},{"text":"Two","delay_minutes":800}]`, fromMessage)}, "24 hour"},
+		{"an earlier wait counts for a message trigger", message, []Step{waitStep("wait", 1000), sequenceStep(`[{"text":"One","delay_minutes":500}]`, fromMessage)}, "24 hour"},
+		{"a wait before a comment's response does not count", comment, []Step{private, waitStep("wait", 1000), sequenceStep(`[{"text":"One","delay_minutes":500}]`, fromComment)}, ""},
+		{"one delay at the window", message, []Step{sequenceStep(`[{"text":"One","delay_minutes":1440}]`, fromMessage)}, "under 24 hours"},
+		{"a negative delay", message, []Step{sequenceStep(`[{"text":"One","delay_minutes":-1}]`, fromMessage)}, "under 24 hours"},
+		{"a fractional delay", message, []Step{sequenceStep(`[{"text":"One","delay_minutes":1.5}]`, fromMessage)}, "whole-minute"},
+		{"empty text", message, []Step{sequenceStep(`[{"text":"  "}]`, fromMessage)}, "needs text"},
+		{"text over the byte limit", message, []Step{sequenceStep([]any{map[string]any{"text": strings.Repeat("가", 334)}}, fromMessage)}, "byte limit"},
+		{"no messages", message, []Step{sequenceStep(`[]`, fromMessage)}, "between 1 and 5"},
+		{"too many messages", message, []Step{sequenceStep(`[{"text":"1"},{"text":"2"},{"text":"3"},{"text":"4"},{"text":"5"},{"text":"6"}]`, fromMessage)}, "between 1 and 5"},
+		{"delivery is chosen directly", message, []Step{sequenceStep(two, map[string]Value{"message_id": reference("source.message_id"), "delivery": literal("broadcast")})}, "review or automatic"},
+		{"the response window is bounded", comment, []Step{private, sequenceStep(two, map[string]Value{"engagement_id": reference("source.engagement_id"), "response_window_minutes": literal(10081)})}, "7 days"},
+		{"a run answers once", message, []Step{replyStep(), sequenceStep(two, fromMessage)}, "answers one message once"},
+		{"unknown fields are rejected", message, []Step{sequenceStep(two, map[string]Value{"message_id": reference("source.message_id"), "tag": literal("HUMAN_AGENT")})}, "unsupported follow-up field"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			err := Validate(Definition{Schema: 1, Source: test.source, Steps: test.steps}, true)
+			if test.want == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, test.want)
+			require.ErrorIs(t, err, ErrInvalid)
+		})
+	}
 }
 
 func TestMessageReplyValidation(t *testing.T) {
@@ -394,6 +453,108 @@ func TestTakenOverConversationStartsNoRunEvenAfterResume(t *testing.T) {
 	assert.Equal(t, []string{"after"}, f.runSources(t, workflow.ID))
 }
 
+func (f *messageSourceFixture) parkedRun(t *testing.T, workflowID string, wakeAt time.Time) {
+	t.Helper()
+	_, err := f.s.db.NewRaw(`INSERT INTO workflow_runs(id,workflow_id,workspace_id,workflow_name,workflow_revision,mode,state,revision,definition_json,authority_json,source_json,remaining_json,results_json,wake_at,created_at,updated_at) VALUES('parked',?,'ws','DM',1,'live','waiting',1,'{}','{}','{}','[]','[]',?,?,?)`, workflowID, wakeAt, f.now, f.now).Exec(t.Context())
+	require.NoError(t, err)
+	_, err = f.s.db.NewRaw(`INSERT INTO message_sequence_waits(run_id,workspace_id,item_id,account_id,author_remote_id,replied_at,respond_by) VALUES('parked','ws','comment','ig','reader',?,?)`, f.now, wakeAt).Exec(t.Context())
+	require.NoError(t, err)
+}
+
+func (f *messageSourceFixture) parkedWake(t *testing.T) time.Time {
+	t.Helper()
+	var wake time.Time
+	require.NoError(t, f.s.db.NewSelect().Model((*runRecord)(nil)).Column("wake_at").Where("id = 'parked'").Scan(t.Context(), &wake))
+	return wake
+}
+
+func eachMessageBackend(t *testing.T, test func(*testing.T, *messageSourceFixture)) {
+	t.Helper()
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) { test(t, newMessageSourceFixture(t, backend)) })
+	}
+}
+
+func TestRunsWaitingForAResponseDoNotHoldTheActiveRunLimit(t *testing.T) {
+	eachMessageBackend(t, func(t *testing.T, f *messageSourceFixture) {
+		workflow := f.publish(t, messageSource(), nil)
+		f.parkedRun(t, workflow.ID, f.now.Add(7*24*time.Hour))
+		count, err := countActiveRuns(t.Context(), f.s.db, "ws")
+		require.NoError(t, err)
+		assert.Zero(t, count)
+	})
+}
+
+func TestBatchedCheckWakesOnlyRunsWithSomethingToDo(t *testing.T) {
+	eachMessageBackend(t, func(t *testing.T, f *messageSourceFixture) {
+		workflow := f.publish(t, messageSource(), nil)
+		far := f.now.Add(7 * 24 * time.Hour).Truncate(time.Second)
+		f.parkedRun(t, workflow.ID, far)
+
+		require.NoError(t, f.s.wakeRespondedRuns(t.Context(), f.now.Add(time.Minute)))
+		assert.WithinDuration(t, far, f.parkedWake(t), time.Second, "nothing happened")
+
+		f.message(t, models.DirectMessage{ID: "older", AuthorRemoteID: "reader", Body: "hi", RemoteCreatedAt: f.now.Add(-time.Hour)})
+		require.NoError(t, f.s.wakeRespondedRuns(t.Context(), f.now.Add(time.Minute)))
+		assert.WithinDuration(t, far, f.parkedWake(t), time.Second, "a message from before the private reply is not a response")
+
+		f.message(t, models.DirectMessage{ID: "response", AuthorRemoteID: "reader", Body: "hi", RemoteCreatedAt: f.now.Add(time.Minute)})
+		wakeAt := f.now.Add(2 * time.Minute)
+		require.NoError(t, f.s.wakeRespondedRuns(t.Context(), wakeAt))
+		assert.WithinDuration(t, wakeAt, f.parkedWake(t), time.Second)
+	})
+}
+
+func TestBatchedCheckWakesARunThatMustStop(t *testing.T) {
+	for name, stop := range map[string]func(*testing.T, *messageSourceFixture){
+		"the person opted out": func(t *testing.T, f *messageSourceFixture) {
+			_, err := f.s.db.NewRaw(`INSERT INTO engagement_automation_optouts(social_account_id,author_remote_id,created_at) VALUES('ig','reader',?)`, f.now).Exec(t.Context())
+			require.NoError(t, err)
+		},
+		"someone took over the comment": func(t *testing.T, f *messageSourceFixture) {
+			_, err := f.s.db.NewInsert().Model(&models.EngagementItem{ID: "comment", WorkspaceID: "ws", SocialAccountID: "ig", RemoteID: "remote", Body: "guide", AuthorRemoteID: "reader", Platform: "instagram", RemoteCreatedAt: f.now, AutomationStoppedAt: f.now, CreatedAt: f.now, UpdatedAt: f.now}).Exec(t.Context())
+			require.NoError(t, err)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			eachMessageBackend(t, func(t *testing.T, f *messageSourceFixture) {
+				workflow := f.publish(t, messageSource(), nil)
+				f.parkedRun(t, workflow.ID, f.now.Add(7*24*time.Hour))
+				stop(t, f)
+				wakeAt := f.now.Add(time.Minute)
+				require.NoError(t, f.s.wakeRespondedRuns(t.Context(), wakeAt))
+				assert.WithinDuration(t, wakeAt, f.parkedWake(t), time.Second)
+			})
+		})
+	}
+}
+
+func TestBatchedCheckClearsFinishedWaits(t *testing.T) {
+	eachMessageBackend(t, func(t *testing.T, f *messageSourceFixture) {
+		workflow := f.publish(t, messageSource(), nil)
+		f.parkedRun(t, workflow.ID, f.now.Add(time.Hour))
+		_, err := f.s.db.NewRaw(`UPDATE workflow_runs SET state = 'cancelled' WHERE id = 'parked'`).Exec(t.Context())
+		require.NoError(t, err)
+		require.NoError(t, f.s.wakeRespondedRuns(t.Context(), f.now))
+		remaining, err := f.s.db.NewSelect().Table("message_sequence_waits").Count(t.Context())
+		require.NoError(t, err)
+		assert.Zero(t, remaining)
+	})
+}
+
+func TestTakeoverCancelsACommentRunWaitingForThatPerson(t *testing.T) {
+	eachMessageBackend(t, func(t *testing.T, f *messageSourceFixture) {
+		workflow := f.publish(t, messageSource(), nil)
+		f.parkedRun(t, workflow.ID, f.now.Add(time.Hour))
+		require.NoError(t, f.s.db.RunInTx(t.Context(), nil, func(ctx context.Context, tx bun.Tx) error {
+			return f.s.CancelMessageAutomationRuns(ctx, tx, "ws", "c-reader", nil, "A person took over this conversation.")
+		}))
+		var state string
+		require.NoError(t, f.s.db.NewSelect().Model((*runRecord)(nil)).Column("state").Where("id = 'parked'").Scan(t.Context(), &state))
+		assert.Equal(t, StateCancelled, state)
+	})
+}
+
 func TestMessageFirstStoredFromHistoryNeverStartsARun(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -507,6 +668,58 @@ func TestLapsedTakeoverNoLongerHoldsAMessage(t *testing.T) {
 			f.message(t, models.DirectMessage{ID: "after", AuthorRemoteID: "reader", Body: "guide"})
 			require.NoError(t, f.s.poll(t.Context(), workflow.ID))
 			assert.Equal(t, []string{"after"}, f.runSources(t, workflow.ID))
+		})
+	}
+}
+
+func (f *messageSourceFixture) parkedReview(t *testing.T, workflowID string, sequenceLength int, triggerAt time.Time) {
+	t.Helper()
+	f.message(t, models.DirectMessage{ID: "trigger", AuthorRemoteID: "reader", Body: "guide", RemoteCreatedAt: triggerAt})
+	_, err := f.s.db.NewRaw(`INSERT INTO workflow_runs(id,workflow_id,workspace_id,workflow_name,workflow_revision,mode,state,revision,definition_json,authority_json,source_json,remaining_json,results_json,created_at,updated_at) VALUES('review',?,'ws','DM',1,'live','awaiting_approval',1,'{}','{}','{}','[]','[]',?,?)`, workflowID, f.now, f.now).Exec(t.Context())
+	require.NoError(t, err)
+	_, err = f.s.db.NewRaw(`INSERT INTO message_automation_replies(id,workspace_id,conversation_id,trigger_message_id,workflow_id,run_id,step_id,user_id,body,state,reason,message_id,sequence_position,sequence_length,comment_item_id,created_at,updated_at) VALUES('receipt','ws','c-reader','trigger',?,'review','send','user','Hi','awaiting_review','','',0,?,'',?,?)`, workflowID, sequenceLength, f.now, f.now).Exec(t.Context())
+	require.NoError(t, err)
+}
+
+func (f *messageSourceFixture) reviewOutcome(t *testing.T) (runState, runError, receiptState, receiptReason string) {
+	t.Helper()
+	require.NoError(t, f.s.db.NewRaw(`SELECT r.state, r.error, a.state, a.reason FROM workflow_runs r JOIN message_automation_replies a ON a.run_id = r.id WHERE r.id = 'review'`).Scan(t.Context(), &runState, &runError, &receiptState, &receiptReason))
+	return runState, runError, receiptState, receiptReason
+}
+
+func TestLateMessageApprovalEndsWithItsReason(t *testing.T) {
+	day := 24 * time.Hour
+	tests := map[string]struct {
+		sequenceLength int
+		triggerAge     time.Duration
+		windowLeft     time.Duration
+		ended          bool
+	}{
+		"open window":                         {sequenceLength: 2, triggerAge: time.Hour, windowLeft: time.Hour},
+		"closed window":                       {sequenceLength: 2, triggerAge: time.Hour, windowLeft: -time.Minute, ended: true},
+		"closed window on a plain reply":      {triggerAge: time.Hour, windowLeft: -time.Minute, ended: true},
+		"a later message extends a plain one": {triggerAge: 2 * day, windowLeft: time.Hour},
+		"but not a sequence":                  {sequenceLength: 2, triggerAge: 2 * day, windowLeft: time.Hour, ended: true},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			eachMessageBackend(t, func(t *testing.T, f *messageSourceFixture) {
+				workflow := f.publish(t, messageSource(), nil)
+				f.parkedReview(t, workflow.ID, test.sequenceLength, f.now.Add(-test.triggerAge))
+				_, err := f.s.db.NewUpdate().Model((*models.Conversation)(nil)).Set("messaging_window_expires_at = ?", f.now.Add(test.windowLeft)).Where("id = 'c-reader'").Exec(t.Context())
+				require.NoError(t, err)
+				require.NoError(t, f.s.endLateMessageApprovals(t.Context(), f.now))
+				runState, runError, receiptState, receiptReason := f.reviewOutcome(t)
+				if !test.ended {
+					assert.Equal(t, StateApproval, runState)
+					assert.Equal(t, "awaiting_review", receiptState)
+					return
+				}
+				assert.Equal(t, StateCancelled, runState)
+				assert.Equal(t, stopReasonApprovalLate, runError)
+				assert.Equal(t, "cancelled", receiptState)
+				assert.Equal(t, stopReasonApprovalLate, receiptReason)
+			})
 		})
 	}
 }

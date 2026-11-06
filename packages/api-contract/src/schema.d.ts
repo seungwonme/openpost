@@ -7928,8 +7928,14 @@ export interface components {
             created_at: string;
             id: string;
             message_id?: string;
+            /** Format: date-time */
+            not_before?: string;
             reason?: string;
             run_id: string;
+            /** Format: int64 */
+            sequence_length: number;
+            /** Format: int64 */
+            sequence_position: number;
             state: string;
             step_id: string;
             trigger_message_id: string;
@@ -18237,7 +18243,7 @@ export interface components {
                 [key: string]: components["schemas"]["WorkflowValue"];
             };
             /** @enum {string} */
-            kind: "create_draft" | "build_draft" | "approval" | "schedule" | "reply" | "comment_reply" | "private_comment_reply" | "comment_handoff" | "message_reply" | "wait" | "condition" | "metrics" | "http_request" | "code" | "ai_text" | "ai_decision" | "set_fields" | "text" | "parse_json" | "list_filter" | "list_sort" | "list_limit" | "merge" | "date" | "tracking_link" | "read_feed";
+            kind: "create_draft" | "build_draft" | "approval" | "schedule" | "reply" | "comment_reply" | "private_comment_reply" | "comment_handoff" | "message_reply" | "message_sequence" | "wait" | "condition" | "metrics" | "http_request" | "code" | "ai_text" | "ai_decision" | "set_fields" | "text" | "parse_json" | "list_filter" | "list_sort" | "list_limit" | "merge" | "date" | "tracking_link" | "read_feed";
             name: string;
             then?: components["schemas"]["WorkflowStep"][] | null;
         };
