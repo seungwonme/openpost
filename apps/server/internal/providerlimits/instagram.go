@@ -52,6 +52,13 @@ func InstagramLoginSettingUnavailable(key string) bool {
 	}
 }
 
+// InstagramUnifiedSettingUnavailable covers a system user token with no Page.
+// Meta lists product tagging as supported for Unified Login, but documents no
+// replacement for the Facebook Page search behind the location picker.
+func InstagramUnifiedSettingUnavailable(key string) bool {
+	return key == "location_id"
+}
+
 func InstagramCollaborators(raw string) []string {
 	values := strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '\n' })
 	clean := make([]string, 0, len(values))

@@ -30,14 +30,19 @@ func NewInstagramLoginAdapter(clientID, clientSecret, redirectURI string) *Insta
 }
 
 func (i *InstagramAdapter) validateLoginSettings(req *PublishRequest) error {
-	if !i.instagramLogin {
+	unavailable := providerlimits.InstagramLoginSettingUnavailable
+	switch {
+	case i.instagramLogin:
+	case i.unifiedLogin:
+		unavailable = providerlimits.InstagramUnifiedSettingUnavailable
+	default:
 		return nil
 	}
 	settings := append([]map[string]interface{}{req.Settings}, req.MediaSettings...)
 	for _, values := range settings {
 		for key := range values {
 			value := settingString(values, key)
-			if providerlimits.InstagramLoginSettingUnavailable(key) && value != "" && value != "[]" {
+			if unavailable(key) && value != "" && value != "[]" {
 				return fmt.Errorf("instagram setting %s requires a Facebook Login connection", key)
 			}
 		}

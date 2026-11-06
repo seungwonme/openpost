@@ -10,6 +10,8 @@ export type AccountManagementURLFeedback = {
 		| 'oauth_failed'
 		| 'facebook_no_pages'
 		| 'instagram_no_page_linked_account'
+		| 'instagram_no_assigned_account'
+		| 'instagram_configuration_no_account'
 		| 'token_exchange_failed'
 		| 'profile_fetch_failed'
 		| 'account_selection_failed'
@@ -46,6 +48,10 @@ export function interpretAccountManagementURL(url: URL): AccountManagementURLSta
 		feedback = { kind: 'facebook_no_pages' };
 	} else if (oauthStatus === 'failed' && oauthReason === 'instagram_no_page_linked_account') {
 		feedback = { kind: 'instagram_no_page_linked_account' };
+	} else if (oauthStatus === 'failed' && oauthReason === 'instagram_no_assigned_account') {
+		feedback = { kind: 'instagram_no_assigned_account' };
+	} else if (oauthStatus === 'failed' && oauthReason === 'instagram_configuration_no_account') {
+		feedback = { kind: 'instagram_configuration_no_account' };
 	} else if (
 		oauthStatus === 'failed' &&
 		(oauthReason === 'token_exchange_failed' ||
@@ -93,6 +99,8 @@ export function presentAccountManagementFeedback(
 		oauth_failed: m.accounts_oauth_failed,
 		facebook_no_pages: m.accounts_oauth_facebook_no_pages,
 		instagram_no_page_linked_account: m.accounts_oauth_instagram_no_page_linked_account,
+		instagram_no_assigned_account: m.accounts_oauth_instagram_no_assigned_account,
+		instagram_configuration_no_account: m.accounts_oauth_instagram_configuration_no_account,
 		token_exchange_failed: m.accounts_oauth_token_exchange_failed,
 		profile_fetch_failed: m.accounts_oauth_profile_fetch_failed,
 		account_selection_failed: m.accounts_oauth_account_selection_failed,

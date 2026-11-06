@@ -35,6 +35,13 @@ type AccountSaver struct {
 	crypto      *crypto.TokenEncryptor
 	entitlement entitlements.Service
 	avatars     accountavatar.Cache
+	afterSave   func(context.Context, []*models.SocialAccount)
+}
+
+// SetAfterSave registers a callback that runs after accounts are committed,
+// for new connections and reconnects alike. It must not fail the save.
+func (s *AccountSaver) SetAfterSave(hook func(context.Context, []*models.SocialAccount)) {
+	s.afterSave = hook
 }
 
 type SaveAccountInput struct {
@@ -187,6 +194,9 @@ func (s *AccountSaver) SaveAccountsFromInputs(ctx context.Context, inputs []Save
 		if err := tokenmanager.ScheduleGrantRefreshJob(ctx, s.db, prepared.grant.ID, prepared.grant.AccessTokenExpiresAt); err != nil {
 			log.Printf("[AccountSaver] Failed to schedule refresh job for grant %s: %v", prepared.grant.ID, err)
 		}
+	}
+	if s.afterSave != nil {
+		s.afterSave(ctx, accounts)
 	}
 
 	return accounts, nil

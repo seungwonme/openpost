@@ -33,7 +33,15 @@ func discordChannelIssue(account models.SocialAccount, profile, outputProfile st
 	}
 }
 
+func isInstagramUnifiedAccount(account models.SocialAccount) bool {
+	return platform.AccountProviderKey(account.Platform, account.InstanceURL, account.CapabilityState) == platform.InstagramUnifiedProviderKey
+}
+
 func applyAccountDestinationSettings(account models.SocialAccount, settings map[string]any, resolved *capabilities.ResolvedCapability) {
+	if isInstagramUnifiedAccount(account) {
+		capabilities.ApplyInstagramUnifiedSettings(resolved, settings)
+		return
+	}
 	if isInstagramLoginAccount(account) {
 		capabilities.ApplyInstagramLoginSettings(resolved, settings)
 		return
