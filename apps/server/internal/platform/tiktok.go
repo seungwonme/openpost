@@ -248,21 +248,55 @@ func (t *TikTokAdapter) UploadMedia(_ context.Context, _ string, _ string, _ str
 	return "", fmt.Errorf("tiktok direct post requires publicly accessible HTTPS media URLs")
 }
 
-func (t *TikTokAdapter) UploadMediaWithMetadata(ctx context.Context, accessToken, _ string, req UploadMediaRequest) (string, error) {
+// PublishesMediaDirectly selects the Upload/Inbox video path, where the file
+// goes to TikTok's upload URL inside the durable publish write. Direct Post and
+// photo posts keep pulling from a public URL.
+func (t *TikTokAdapter) PublishesMediaDirectly(settings map[string]interface{}, mimeTypes []string) bool {
+	if !isTikTokUploadMode(settings) || len(mimeTypes) != 1 {
+		return false
+	}
+	return isVideoMime(mimeTypes[0])
+}
+
+// PublishWithMedia sends one Upload/Inbox video as a FILE_UPLOAD. The upload and
+// the publish_id checkpoint happen inside one provider write, so a retry
+// reconciles the same publish_id instead of starting another inbox upload.
+func (t *TikTokAdapter) PublishWithMedia(ctx context.Context, accessToken, _ string, req *PublishRequest, media []UploadMediaRequest) (PublishResult, error) {
+	result, err := executePublishWrite(req, "submit_post", func() (string, error) {
+		return t.publishInboxVideoFile(ctx, accessToken, req, media)
+	})
+	var pending *tiktokPendingError
+	if errors.As(err, &pending) {
+		return pending.result, nil
+	}
+	return result, err
+}
+
+func (t *TikTokAdapter) publishInboxVideoFile(ctx context.Context, accessToken string, req *PublishRequest, media []UploadMediaRequest) (string, error) {
+	if len(media) != 1 || !isVideoMime(media[0].MimeType) {
+		return "", fmt.Errorf("tiktok video publishing requires exactly one video attachment")
+	}
 	if !isTikTokUploadMode(req.Settings) {
 		return "", fmt.Errorf("tiktok file upload is available for Upload/Inbox mode only")
 	}
-	if !isVideoMime(req.MimeType) {
-		return "", fmt.Errorf("tiktok file upload supports video attachments only")
+	if media[0].Reader == nil {
+		return "", fmt.Errorf("tiktok file upload requires media content")
 	}
-	data, err := io.ReadAll(req.Reader)
+	data, err := io.ReadAll(media[0].Reader)
 	if err != nil {
 		return "", fmt.Errorf("reading tiktok upload media: %w", err)
 	}
 	if len(data) == 0 {
 		return "", fmt.Errorf("tiktok file upload requires non-empty media")
 	}
-	return t.uploadVideoFileToInbox(ctx, accessToken, req.MimeType, data)
+	publishID, err := t.uploadVideoFileToInbox(ctx, accessToken, media[0].MimeType, data)
+	if err != nil {
+		return "", err
+	}
+	if err := checkpointTikTokSubmission(req, publishID); err != nil {
+		return "", err
+	}
+	return t.waitForPublishID(ctx, accessToken, publishID, req)
 }
 
 func (t *TikTokAdapter) Publish(ctx context.Context, accessToken, _ string, req *PublishRequest) (PublishResult, error) {
@@ -414,12 +448,7 @@ func (t *TikTokAdapter) uploadVideoFileToInbox(ctx context.Context, accessToken,
 			return "", fmt.Errorf("tiktok video chunk upload: %w", err)
 		}
 	}
-	id, err := t.waitForPublishID(ctx, accessToken, publishID, nil)
-	var pending *tiktokPendingError
-	if errors.As(err, &pending) && pending.result.ProviderState == "inbox_delivered" {
-		return publishID, nil
-	}
-	return id, err
+	return publishID, nil
 }
 
 // tiktokUploadChunks splits a FILE_UPLOAD the way TikTok's Media Transfer

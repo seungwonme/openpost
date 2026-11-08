@@ -556,7 +556,7 @@ func (s *Service) publishRendition(
 	}
 	platformMediaIDs := make([]string, 0, len(mediaAttachments))
 	mediaItems := make([]platform.MediaItem, 0, len(mediaAttachments))
-	_, publishesMediaDirectly := provider.(platform.DirectMediaPublisher)
+	publishesMediaDirectly := publishesMediaDirectly(provider, settings, mediaAttachments)
 	for _, media := range mediaAttachments {
 		s.recordPublicationLifecycleEvent(ctx, publication.WorkspaceID, publication.ID, rendition.ID, lifecycle.EventUploadStarted, lifecycle.StatusStarted, "media upload started", map[string]any{
 			"platform": rendition.Platform,
@@ -876,7 +876,7 @@ func (s *Service) publishRenditionSegments(
 		}
 		platformMediaIDs := make([]string, 0, len(mediaAttachments))
 		mediaItems := make([]platform.MediaItem, 0, len(mediaAttachments))
-		_, publishesMediaDirectly := provider.(platform.DirectMediaPublisher)
+		publishesMediaDirectly := publishesMediaDirectly(provider, settings, mediaAttachments)
 		uploadRendition := *rendition
 		uploadRendition.Body = segment.Body
 		uploadRendition.Description = firstNonEmptyPublisherString(segment.Description, rendition.Description)
@@ -1913,7 +1913,7 @@ func (s *Service) publishProvider(
 	media []models.MediaAttachment,
 ) (platform.PublishResult, error) {
 	direct, ok := provider.(platform.DirectMediaPublisher)
-	if !ok || len(media) == 0 {
+	if !ok || len(media) == 0 || !publishesMediaDirectly(provider, req.Settings, media) {
 		return provider.Publish(ctx, token, accountID, req)
 	}
 	if s.storage == nil {
@@ -2192,7 +2192,7 @@ func (s *Service) uploadRenditionMediaToPlatform(ctx context.Context, account *m
 	_ = json.Unmarshal([]byte(rendition.SettingsJSON), &settings)
 	delete(settings, posttext.NativeSettingsKey)
 
-	if requiresPublicMedia(account.Platform, rendition.Profile) && !usesTikTokFileUpload(account.Platform, settings) {
+	if requiresPublicMedia(account.Platform, rendition.Profile) {
 		return s.getPublicMediaURL(media), nil
 	}
 	if err := publicationauth.RequireReview(ctx, s.db, rendition.PublicationID); err != nil {
@@ -2817,12 +2817,21 @@ func requiresPublicMedia(platformName, profile string) bool {
 	return false
 }
 
-func usesTikTokFileUpload(platformName string, settings map[string]interface{}) bool {
-	if platformName != "tiktok" {
+// publishesMediaDirectly reports whether the provider takes the file bodies in
+// its publish write instead of provider-side media IDs or public URLs.
+func publishesMediaDirectly(provider platform.Publisher, settings map[string]interface{}, media []models.MediaAttachment) bool {
+	if _, ok := provider.(platform.DirectMediaPublisher); !ok {
 		return false
 	}
-	mode := strings.ToUpper(strings.TrimSpace(settingStringPublisher(settings, "content_posting_method")))
-	return mode == "UPLOAD" || mode == "MEDIA_UPLOAD"
+	selector, ok := provider.(platform.DirectMediaSelector)
+	if !ok {
+		return true
+	}
+	mimeTypes := make([]string, 0, len(media))
+	for _, item := range media {
+		mimeTypes = append(mimeTypes, item.MimeType)
+	}
+	return selector.PublishesMediaDirectly(settings, mimeTypes)
 }
 
 func firstContentLine(content string) string {
