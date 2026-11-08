@@ -195,6 +195,14 @@ type DirectMediaPublisher interface {
 	PublishWithMedia(ctx context.Context, accessToken, accountID string, req *PublishRequest, media []UploadMediaRequest) (PublishResult, error)
 }
 
+// DirectMediaSelector lets a DirectMediaPublisher claim only some requests.
+// A provider that does not implement it receives every request with media
+// through PublishWithMedia; one that does falls back to Publish with
+// provider-side media IDs or URLs when it returns false.
+type DirectMediaSelector interface {
+	PublishesMediaDirectly(settings map[string]interface{}, mimeTypes []string) bool
+}
+
 // InstanceCredentialPublisher marks a provider whose write credential belongs
 // to the OpenPost instance rather than a Workspace account. The credential
 // stays inside the provider implementation and never crosses the publisher or

@@ -484,13 +484,13 @@ func TestTikTokFileUploadSendsTheChunksItDeclares(t *testing.T) {
 		}
 	})}
 
-	publishID, err := NewTikTokAdapter("key", "secret", "https://app.example/callback").UploadMediaWithMetadata(t.Context(), "access", "open-1", UploadMediaRequest{
+	req := &PublishRequest{Settings: map[string]interface{}{"content_posting_method": "MEDIA_UPLOAD"}}
+	result, err := NewTikTokAdapter("key", "secret", "https://app.example/callback").PublishWithMedia(t.Context(), "access", "open-1", req, []UploadMediaRequest{{
 		MimeType: "video/mp4",
-		Settings: map[string]interface{}{"content_posting_method": "MEDIA_UPLOAD"},
 		Reader:   bytes.NewReader(make([]byte, videoSize)),
-	})
+	}})
 	require.NoError(t, err)
-	require.Equal(t, "publish-1", publishID)
+	require.Equal(t, "publish-1", result.ProviderReference)
 	require.Equal(t, int64(videoSize), next)
 	require.Equal(t, videoSize/chunkSize, totalChunks, "total_chunk_count must be video_size / chunk_size rounded down")
 	require.Len(t, puts, int(totalChunks))
@@ -693,4 +693,106 @@ func TestTikTokPublicPhotoWaitsForProviderPostIdentity(t *testing.T) {
 	require.Equal(t, PublishSubmissionPending, result.SubmissionState)
 	require.Empty(t, result.ExternalID)
 	require.Equal(t, "publish-1", result.ProviderReference)
+}
+
+// inboxUploadFixture serves TikTok's documented Content Posting API responses
+// for an Upload/Inbox FILE_UPLOAD: init returns publish_id and upload_url, the
+// upload URL accepts 201 chunks, and the status endpoint walks through statuses.
+type inboxUploadFixture struct {
+	inits, puts, statuses int
+	statusBodies          []string
+}
+
+func (f *inboxUploadFixture) install(t *testing.T) {
+	t.Helper()
+	original := httpClient
+	t.Cleanup(func() { httpClient = original })
+	const uploadURL = "https://open-upload.tiktokapis.com/video/?upload_id=1"
+	httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.String() {
+		case tiktokVideoInboxInitURL:
+			f.inits++
+			return jsonResponse(req, `{"data":{"publish_id":"v_inbox_file~v2.123","upload_url":"`+uploadURL+`"},"error":{"code":"ok","message":"","log_id":"log"}}`), nil
+		case uploadURL:
+			f.puts++
+			_, _ = io.Copy(io.Discard, req.Body)
+			return jsonResponseWithStatus(req, http.StatusCreated, `{}`), nil
+		case tiktokPublishStatusURL:
+			body := f.statusBodies[min(f.statuses, len(f.statusBodies)-1)]
+			f.statuses++
+			return jsonResponse(req, body), nil
+		default:
+			t.Fatalf("unexpected request %s", req.URL.String())
+			return nil, nil
+		}
+	})}
+}
+
+func inboxUploadRequest() (*PublishRequest, []UploadMediaRequest, *[]PublishResult) {
+	var checkpoints []PublishResult
+	req := &PublishRequest{Settings: map[string]interface{}{"content_posting_method": "UPLOAD"}, Media: []MediaItem{{MimeType: "video/mp4"}}}
+	req.SetWriteFence(func(PublishResult) error { return nil }, func(result PublishResult) error {
+		checkpoints = append(checkpoints, result)
+		return nil
+	})
+	return req, []UploadMediaRequest{{MimeType: "video/mp4", Reader: bytes.NewReader([]byte("video"))}}, &checkpoints
+}
+
+func TestTikTokInboxFileUploadStillProcessingStaysPendingForReconciliation(t *testing.T) {
+	fixture := &inboxUploadFixture{statusBodies: []string{
+		`{"data":{"status":"PROCESSING_UPLOAD"},"error":{"code":"ok"}}`,
+		`{"data":{"status":"SEND_TO_USER_INBOX"},"error":{"code":"ok"}}`,
+	}}
+	fixture.install(t)
+	adapter := NewTikTokAdapter("", "", "")
+	req, media, checkpoints := inboxUploadRequest()
+
+	result, err := adapter.PublishWithMedia(t.Context(), "access", "open-1", req, media)
+	require.NoError(t, err, "a processing upload is a pending provider state, not a failure")
+	require.Equal(t, PublishSubmissionPending, result.SubmissionState)
+	require.Equal(t, PublishRetryReconcileOnly, result.RetrySafety)
+	require.Equal(t, "processing", result.ProviderState)
+	require.Equal(t, "v_inbox_file~v2.123", result.ProviderReference)
+	require.Empty(t, result.ExternalID)
+	require.NotEmpty(t, *checkpoints, "the publish_id must be durable before the status check")
+	require.Equal(t, "v_inbox_file~v2.123", (*checkpoints)[0].ProviderReference)
+
+	// A retry reconciles the stored reference; it never initializes another upload.
+	result, err = adapter.ReconcilePublishRequest(t.Context(), "access", "open-1", req, result.ProviderReference)
+	require.NoError(t, err)
+	require.Equal(t, PublishSubmissionPending, result.SubmissionState)
+	require.Equal(t, "inbox_delivered", result.ProviderState)
+	require.Equal(t, 1, fixture.inits)
+	require.Equal(t, 1, fixture.puts)
+}
+
+func TestTikTokInboxFileUploadDeliveredToInboxIsPendingCreatorAction(t *testing.T) {
+	fixture := &inboxUploadFixture{statusBodies: []string{`{"data":{"status":"SEND_TO_USER_INBOX"},"error":{"code":"ok"}}`}}
+	fixture.install(t)
+	req, media, _ := inboxUploadRequest()
+
+	result, err := NewTikTokAdapter("", "", "").PublishWithMedia(t.Context(), "access", "open-1", req, media)
+	require.NoError(t, err)
+	require.Equal(t, PublishSubmissionPending, result.SubmissionState)
+	require.Equal(t, "inbox_delivered", result.ProviderState)
+	require.Equal(t, "v_inbox_file~v2.123", result.ProviderReference)
+}
+
+func TestTikTokInboxFileUploadFailureIsAProviderRejection(t *testing.T) {
+	fixture := &inboxUploadFixture{statusBodies: []string{`{"data":{"status":"FAILED","fail_reason":"file_format_check_failed"},"error":{"code":"ok"}}`}}
+	fixture.install(t)
+	req, media, _ := inboxUploadRequest()
+
+	_, err := NewTikTokAdapter("", "", "").PublishWithMedia(t.Context(), "access", "open-1", req, media)
+	var providerErr *HTTPError
+	require.ErrorAs(t, err, &providerErr)
+	require.Equal(t, "tiktok_publish_failed:file_format_check_failed", providerErr.Code)
+}
+
+func TestTikTokOnlyClaimsUploadModeVideoForDirectMedia(t *testing.T) {
+	adapter := NewTikTokAdapter("", "", "")
+	upload := map[string]interface{}{"content_posting_method": "UPLOAD"}
+	require.True(t, adapter.PublishesMediaDirectly(upload, []string{"video/mp4"}))
+	require.False(t, adapter.PublishesMediaDirectly(map[string]interface{}{"content_posting_method": "DIRECT_POST"}, []string{"video/mp4"}))
+	require.False(t, adapter.PublishesMediaDirectly(upload, []string{"image/jpeg", "image/jpeg"}), "photo posts still pull from public URLs")
 }
