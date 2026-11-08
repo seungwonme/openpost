@@ -36,7 +36,8 @@
 		formatAccountPlatformLabel,
 		formatSocialAccountName,
 		getPlatformName,
-		getPlatformColor
+		getPlatformColor,
+		getPlatformKey
 	} from '$lib/utils';
 	import PlatformIcon from '$lib/components/platform-icon.svelte';
 	import { goto } from '$app/navigation';
@@ -1478,6 +1479,12 @@
 		beginProviderConnection(provider);
 	}
 
+	// Near-black brand chips vanish on dark surfaces; a hairline keeps the mark visible.
+	function providerChipRing(platform: string) {
+		const key = getPlatformKey(platform);
+		return key === 'x' || key === 'tiktok' ? 'ring-1 ring-inset ring-border' : '';
+	}
+
 	function beginProviderConnection(provider: ProviderEntry) {
 		if (isConnectorProvider(provider)) {
 			void connectConnector(provider);
@@ -1865,8 +1872,8 @@
 											>
 												<div
 													class={provider.platform === 'youtube'
-														? 'flex shrink-0 items-center justify-center'
-														: `flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${getPlatformColor(provider.platform)}`}
+														? 'flex h-10 w-10 shrink-0 items-center justify-center'
+														: `flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${getPlatformColor(provider.platform)} ${providerChipRing(provider.platform)}`}
 												>
 													{#if provider.platform === 'youtube'}<YouTubeBrand />{:else}<PlatformIcon
 															platform={provider.platform}
@@ -1953,8 +1960,8 @@
 													<div class="flex items-start gap-3">
 														<div
 															class={provider.platform === 'youtube'
-																? 'flex shrink-0 items-center justify-center'
-																: `flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${getPlatformColor(provider.platform)}`}
+																? 'flex h-10 w-10 shrink-0 items-center justify-center'
+																: `flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${getPlatformColor(provider.platform)} ${providerChipRing(provider.platform)}`}
 														>
 															{#if provider.platform === 'youtube'}<YouTubeBrand
 																/>{:else}<PlatformIcon
