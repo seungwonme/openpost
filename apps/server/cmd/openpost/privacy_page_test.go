@@ -55,20 +55,25 @@ func TestPrivacyPageServedAsStaticHTML(t *testing.T) {
 
 func TestTermsPageAndTikTokVerificationFile(t *testing.T) {
 	static := filepath.Join("..", "..", "..", "web", "static")
-	const verificationName = "tiktokkIio8XHwfOvrD5N1h5XwSPi5Vw824ajM.txt"
 	terms, err := os.ReadFile(filepath.Join(static, "terms.html"))
 	require.NoError(t, err)
-	verification, err := os.ReadFile(filepath.Join(static, verificationName))
-	require.NoError(t, err)
-	require.Equal(t, "tiktok-developers-site-verification=kIio8XHwfOvrD5N1h5XwSPi5Vw824ajM", string(verification))
 
-	webFS := withAppRoutes(fstest.MapFS{
-		"index.html":     {Data: []byte(`<html><head></head><body><div id="app"></div></body></html>`)},
-		"terms.html":     {Data: terms},
-		verificationName: {Data: verification},
-	}, "/")
+	verificationFiles := map[string]string{
+		"tiktokkIio8XHwfOvrD5N1h5XwSPi5Vw824ajM.txt": "tiktok-developers-site-verification=kIio8XHwfOvrD5N1h5XwSPi5Vw824ajM",
+		"tiktokGvky3zADrNAANClBnIu3fXarJcPaGoSa.txt": "tiktok-developers-site-verification=Gvky3zADrNAANClBnIu3fXarJcPaGoSa",
+	}
+	files := fstest.MapFS{
+		"index.html": {Data: []byte(`<html><head></head><body><div id="app"></div></body></html>`)},
+		"terms.html": {Data: terms},
+	}
+	for name, want := range verificationFiles {
+		data, err := os.ReadFile(filepath.Join(static, name))
+		require.NoError(t, err)
+		require.Equal(t, want, string(data), name)
+		files[name] = &fstest.MapFile{Data: data}
+	}
 	e := echo.New()
-	registerSpaRoutes(e, webFS)
+	registerSpaRoutes(e, withAppRoutes(files, "/"))
 
 	termsReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/terms", nil)
 	termsRec := httptest.NewRecorder()
@@ -80,12 +85,14 @@ func TestTermsPageAndTikTokVerificationFile(t *testing.T) {
 	}
 	require.NotContains(t, body, "mailto:")
 
-	txtReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/"+verificationName, nil)
-	txtRec := httptest.NewRecorder()
-	e.ServeHTTP(txtRec, txtReq)
-	require.Equal(t, http.StatusOK, txtRec.Code)
-	require.Contains(t, txtRec.Header().Get("Content-Type"), "text/plain")
-	require.Equal(t, string(verification), txtRec.Body.String())
+	for name, want := range verificationFiles {
+		txtReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/"+name, nil)
+		txtRec := httptest.NewRecorder()
+		e.ServeHTTP(txtRec, txtReq)
+		require.Equal(t, http.StatusOK, txtRec.Code, name)
+		require.Contains(t, txtRec.Header().Get("Content-Type"), "text/plain", name)
+		require.Equal(t, want, txtRec.Body.String(), name)
+	}
 }
 
 func TestPagesLinkToEachOther(t *testing.T) {
