@@ -27,16 +27,14 @@ OpenPost connects a YouTube channel with Google OAuth and uploads one video per 
 OpenPost requests these scopes. Enter the full URLs in Google Auth Platform when configuring data access:
 
 ```text
-https://www.googleapis.com/auth/youtube.readonly
-https://www.googleapis.com/auth/yt-analytics.readonly
 https://www.googleapis.com/auth/youtube.upload
-https://www.googleapis.com/auth/youtube
 https://www.googleapis.com/auth/youtube.force-ssl
+https://www.googleapis.com/auth/yt-analytics.readonly
 ```
 
 The [YouTube Analytics API](https://developers.google.com/youtube/analytics/reference/reports/query) must be enabled before OpenPost can read channel reports.
 
-Comments, replies, and moderation use `youtube.force-ssl`, including Google's [comment moderation endpoint](https://developers.google.com/youtube/v3/docs/comments/setModerationStatus). After upgrading from v7.13.0 or earlier, add this scope in Google Auth Platform and reconnect existing YouTube accounts to grant it. Adding a scope in Google Cloud alone does not update an existing connection.
+`youtube.force-ssl` covers channel and video reads, imports, playlists, thumbnails, captions, and comments, replies, and moderation, including Google's [comment moderation endpoint](https://developers.google.com/youtube/v3/docs/comments/setModerationStatus). OpenPost no longer requests `youtube` or `youtube.readonly`. Channels connected earlier keep working with the scopes they already hold. To grant a missing scope to an existing connection, add it in Google Auth Platform and reconnect the account; adding a scope in Google Cloud alone does not update an existing connection.
 
 Google documents [YouTube OAuth](https://developers.google.com/youtube/v3/guides/authentication) and the [web-server OAuth client flow](https://developers.google.com/identity/protocols/oauth2/web-server).
 

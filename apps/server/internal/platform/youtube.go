@@ -1422,13 +1422,17 @@ func youtubeSubscriberDescription(count string) string {
 	return count + " subscribers"
 }
 
+// youtubeScopes is the minimum set Google's sensitive-scope verification
+// accepts. youtube.force-ssl is listed for every Data API method OpenPost calls
+// (including list reads, playlist inserts, thumbnails and captions), and
+// yt-analytics.readonly is required by the Analytics reports endpoint. The
+// broader youtube and youtube.readonly scopes are no longer requested, but
+// accounts connected earlier still hold them and keep working.
 func youtubeScopes() []string {
 	return []string{
-		"https://www.googleapis.com/auth/youtube.readonly",
-		youtubeAnalyticsReadScope,
 		"https://www.googleapis.com/auth/youtube.upload",
-		"https://www.googleapis.com/auth/youtube",
 		youtubeCommentScope,
+		youtubeAnalyticsReadScope,
 	}
 }
 

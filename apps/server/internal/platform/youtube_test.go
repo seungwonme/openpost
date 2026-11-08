@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,14 +44,13 @@ func TestYouTubeGenerateAuthURL(t *testing.T) {
 	if !strings.Contains(query.Get("scope"), "youtube.upload") {
 		t.Fatalf("expected youtube.upload scope, got %q", query.Get("scope"))
 	}
-	if !strings.Contains(query.Get("scope"), "https://www.googleapis.com/auth/youtube") {
-		t.Fatalf("expected youtube management scope for playlists, got %q", query.Get("scope"))
+	want := []string{
+		"https://www.googleapis.com/auth/youtube.upload",
+		"https://www.googleapis.com/auth/youtube.force-ssl",
+		youtubeAnalyticsReadScope,
 	}
-	if !strings.Contains(query.Get("scope"), youtubeAnalyticsReadScope) {
-		t.Fatalf("expected youtube analytics scope, got %q", query.Get("scope"))
-	}
-	if !strings.Contains(query.Get("scope"), "https://www.googleapis.com/auth/youtube.force-ssl") {
-		t.Fatalf("expected YouTube comment permission, got %q", query.Get("scope"))
+	if got := strings.Fields(query.Get("scope")); !slices.Equal(got, want) {
+		t.Fatalf("YouTube must request exactly the minimal scope set %v, got %v", want, got)
 	}
 }
 
@@ -1006,5 +1006,26 @@ func TestYouTubeUploadDistinguishesDailyQuotaFromTransientRateLimits(t *testing.
 				t.Fatalf("provider details leaked: %v", err)
 			}
 		})
+	}
+}
+
+func TestYouTubeNativePostSupportAcceptsMinimalAndLegacyGrants(t *testing.T) {
+	adapter := NewYouTubeAdapter("", "", "")
+	if got := adapter.NativePostSupport().RequiredScopes; !slices.Equal(got, []string{youtubeCommentScope}) {
+		t.Fatalf("default import scope = %v, want only %s", got, youtubeCommentScope)
+	}
+	for name, granted := range map[string]string{
+		"minimal grant":   "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.force-ssl https://www.googleapis.com/auth/yt-analytics.readonly",
+		"legacy readonly": "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload",
+		"legacy full":     "https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube.upload",
+	} {
+		support := adapter.ResolveAccountNativePostSupport(NativePostAccountContext{GrantedScopes: granted})
+		if !support.Supported || len(support.RequiredScopes) != 0 {
+			t.Errorf("%s: support = %#v, want supported with no missing scope", name, support)
+		}
+	}
+	upload := adapter.ResolveAccountNativePostSupport(NativePostAccountContext{GrantedScopes: "https://www.googleapis.com/auth/youtube.upload"})
+	if !slices.Equal(upload.RequiredScopes, []string{youtubeCommentScope}) {
+		t.Fatalf("upload-only grant must still require %s for imports, got %#v", youtubeCommentScope, upload)
 	}
 }

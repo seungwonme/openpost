@@ -14,11 +14,9 @@ https://your-domain.com/api/v1/accounts/youtube/callback
 ```
 
 - OAuth scopes:
-  - `https://www.googleapis.com/auth/youtube.readonly`
-  - `https://www.googleapis.com/auth/yt-analytics.readonly`
   - `https://www.googleapis.com/auth/youtube.upload`
-  - `https://www.googleapis.com/auth/youtube`
   - `https://www.googleapis.com/auth/youtube.force-ssl`
+  - `https://www.googleapis.com/auth/yt-analytics.readonly`
 - One video attachment on the OpenPost post or YouTube-specific variant
 
 ## Configuration
@@ -51,7 +49,7 @@ If `redirect_uri` is omitted, OpenPost derives it from `OPENPOST_APP_URL`.
 ## Current Limits
 
 - Comment and moderation actions require YouTube permissions and can vary by channel or comment.
-- Comments, replies, and moderation require `youtube.force-ssl`. Add it to the OAuth app's data access and reconnect older accounts to grant it. Account details shows this scope as missing until the connection grants it.
+- Comments, replies, and moderation require `youtube.force-ssl`. Add it to the OAuth app's data access and reconnect older accounts to grant it. OpenPost no longer requests `youtube` or `youtube.readonly`; accounts that already hold them keep working. Account details shows this scope as missing until the connection grants it.
 - Test a live account before you rely on YouTube publishing, especially for app review, playlists, and thumbnails.
 
 ## Analytics
