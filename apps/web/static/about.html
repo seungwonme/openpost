@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>OpenPost 소개 / About OpenPost | post.aidenahn.com</title>
+<meta name="description" content="OpenPost at post.aidenahn.com is a self-hosted OpenPost instance operated by Aiden Ahn to publish his own content to Instagram, YouTube and TikTok. OpenPost 인스턴스 소개.">
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#1a1a1a;--muted:#4a4a4a;--link:#0b57d0;--rule:#d0d0d0}
+@media (prefers-color-scheme:dark){:root{--bg:#121212;--fg:#ececec;--muted:#b8b8b8;--link:#8ab4f8;--rule:#3a3a3a}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif}
+main{max-width:46rem;margin:0 auto;padding:2rem 1rem 4rem}
+h1{font-size:1.75rem;line-height:1.25;margin:0 0 .5rem}
+h2{font-size:1.2rem;margin:2rem 0 .5rem}
+section.lang{margin-top:2.5rem;padding-top:1.5rem;border-top:1px solid var(--rule)}
+section.lang:first-of-type{border-top:0;padding-top:0;margin-top:1.5rem}
+a{color:var(--link)}
+a:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.meta,nav{color:var(--muted)}
+ul,ol{padding-left:1.25rem}
+</style>
+</head>
+<body>
+<main>
+<nav aria-label="Language / 언어"><a href="#ko">한국어</a> | <a href="#en">English</a> | <a href="/privacy">개인정보처리방침 / Privacy Policy</a> | <a href="/terms">이용약관 / Terms</a> | <a href="/">로그인 / Sign in</a></nav>
+
+<section class="lang" id="ko" lang="ko">
+<h1>OpenPost 소개</h1>
+<p class="meta">post.aidenahn.com</p>
+<p><code>post.aidenahn.com</code>은 오픈소스 <a href="https://github.com/getopenpost/openpost">OpenPost</a>를 자체 호스팅한 인스턴스입니다. 안승원(Aiden Ahn)이 직접 운영하며, NomaDamas가 소유한 Instagram, YouTube, TikTok 계정에 자신의 콘텐츠를 게시하고 관리하는 데 씁니다. 일반에 공개된 서비스가 아니며, 운영자가 초대한 사람만 로그인할 수 있습니다.</p>
+
+<h2>무엇을 하나요</h2>
+<ul>
+<li>영상, 사진, 글을 한 번 작성해 Instagram, YouTube, TikTok에 게시하거나 예약합니다.</li>
+<li>Instagram 게시물에 달린 댓글과 YouTube 영상의 댓글을 한곳에서 읽고 답하거나 숨기고 삭제합니다.</li>
+<li>Instagram 댓글의 키워드에 따라 비공개 DM(비공개 답장)을 보내고, 받은 DM에 자동으로 답하거나 후속 DM을 보냅니다. STOP 등 수신 거부 요청은 기록하고 이후 자동 메시지를 보내지 않습니다.</li>
+<li>게시한 콘텐츠의 성과 지표를 확인합니다.</li>
+</ul>
+
+<h2>Google 계정 권한을 어디에 쓰나요</h2>
+<p>YouTube 채널을 연결할 때 Google이 아래 권한 승인을 요청합니다. 연결한 채널의 일만 하며, 사용자가 누른 동작만 실행합니다.</p>
+<ul>
+<li><code>youtube.upload</code>: 준비한 영상을 연결한 채널에 업로드합니다.</li>
+<li><code>youtube.force-ssl</code>: 영상의 댓글을 읽고, 답글을 달고, 숨기거나 삭제하며, 첫 댓글과 자막을 올립니다.</li>
+<li><code>youtube</code>: 업로드한 영상을 재생목록에 넣고 썸네일 등 영상 설정을 관리합니다.</li>
+<li><code>youtube.readonly</code>: 채널, 영상, 재생목록 정보를 읽어 화면에 표시하고 기존 게시물을 가져옵니다.</li>
+<li><code>yt-analytics.readonly</code>: 채널의 조회수와 반응 등 분석 보고서를 화면에 표시합니다.</li>
+</ul>
+<p>Google API에서 받은 정보의 사용과 다른 앱으로의 전달은 <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>(제한적 사용 요건 포함)를 준수합니다. 이 서비스는 YouTube API Services를 사용하며, YouTube 기능을 쓰면 <a href="https://www.youtube.com/t/terms">YouTube 서비스 약관</a>에 동의하는 것입니다. 자세한 처리 방식은 <a href="/privacy">개인정보처리방침</a>에 있습니다.</p>
+
+<h2>다른 플랫폼 권한</h2>
+<p>Instagram은 전문 계정의 게시, 댓글 관리, 메시지 송수신, 성과 지표 조회에 Meta 권한을 쓰고, TikTok은 영상과 사진 게시에 쓰입니다. 각 권한은 위 기능에만 사용합니다.</p>
+
+<h2>링크</h2>
+<ul>
+<li><a href="/">로그인 (Sign in)</a></li>
+<li><a href="/privacy">개인정보처리방침</a></li>
+<li><a href="/terms">이용약관</a></li>
+<li><a href="https://www.aidenahn.com/about">운영자 소개 및 연락처</a></li>
+<li><a href="https://github.com/getopenpost/openpost">OpenPost 오픈소스 프로젝트</a>: 이 인스턴스는 OpenPost 프로젝트의 포크를 실행합니다.</li>
+</ul>
+</section>
+
+<section class="lang" id="en" lang="en">
+<h1>About OpenPost</h1>
+<p class="meta">post.aidenahn.com</p>
+<p><code>post.aidenahn.com</code> is a self-hosted instance of the open-source <a href="https://github.com/getopenpost/openpost">OpenPost</a> project. It is operated by Aiden Ahn (안승원) to publish and manage his own content on Instagram, YouTube and TikTok accounts owned by NomaDamas. It is not offered to the public; only people the operator invites can sign in.</p>
+
+<h2>What it does</h2>
+<ul>
+<li>Write a video, photo or text post once, then publish or schedule it to Instagram, YouTube and TikTok.</li>
+<li>Read comments on Instagram posts and YouTube videos in one place, and reply to, hide or delete them.</li>
+<li>Send a private Instagram DM (private reply) based on keywords in a comment, and answer incoming DMs or send follow-ups automatically. STOP and similar opt-out requests are recorded and no further automated messages are sent.</li>
+<li>Review performance metrics of published content.</li>
+</ul>
+
+<h2>How Google account permissions are used</h2>
+<p>When a YouTube channel is connected, Google asks you to approve the permissions below. They act only on the connected channel, and only for actions a signed-in user starts.</p>
+<ul>
+<li><code>youtube.upload</code>: upload a prepared video to the connected channel.</li>
+<li><code>youtube.force-ssl</code>: read comments on videos, post replies, hide or delete comments, and post a first comment and captions.</li>
+<li><code>youtube</code>: add an uploaded video to a playlist and manage video settings such as the thumbnail.</li>
+<li><code>youtube.readonly</code>: read channel, video and playlist information to show it on screen and import existing posts.</li>
+<li><code>yt-analytics.readonly</code>: show the channel's analytics reports, such as views and engagement.</li>
+</ul>
+<p>The use and transfer of information received from Google APIs to any other app adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements. The Service uses YouTube API Services, and by using YouTube features you agree to be bound by the <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>. The <a href="/privacy">Privacy Policy</a> describes how information is handled.</p>
+
+<h2>Other platform permissions</h2>
+<p>Instagram permissions from Meta are used to publish, manage comments, send and receive messages, and read performance metrics for the professional account. TikTok access is used to publish videos and photos. Each permission is used only for the functions above.</p>
+
+<h2>Links</h2>
+<ul>
+<li><a href="/">Sign in</a></li>
+<li><a href="/privacy">Privacy Policy</a></li>
+<li><a href="/terms">Terms of Service</a></li>
+<li><a href="https://www.aidenahn.com/about">Operator page and contact</a></li>
+<li><a href="https://github.com/getopenpost/openpost">OpenPost open-source project</a>: this instance runs a fork of OpenPost.</li>
+</ul>
+</section>
+</main>
+</body>
+</html>

@@ -41,6 +41,10 @@ func TestPrivacyPageServedAsStaticHTML(t *testing.T) {
 			"https://www.aidenahn.com/about",
 			"2026-11-08",
 			"30",
+			"7일",
+			"within 7 days",
+			"TikTok",
+			`href="/about"`,
 		} {
 			require.Contains(t, body, want, target)
 		}
@@ -100,4 +104,44 @@ func TestPagesLinkToEachOther(t *testing.T) {
 	privacy, err := os.ReadFile(filepath.Join(static, "privacy.html"))
 	require.NoError(t, err)
 	require.Contains(t, string(privacy), `href="/terms"`)
+	require.Contains(t, string(privacy), `href="/about"`)
+}
+
+// The about page is the public homepage that Google's app verification reads:
+// it must describe the app and link the policy pages, not only offer sign-in.
+func TestAboutPageServedAsStaticHTML(t *testing.T) {
+	page, err := os.ReadFile(filepath.Join("..", "..", "..", "web", "static", "about.html"))
+	require.NoError(t, err)
+
+	e := echo.New()
+	registerSpaRoutes(e, withAppRoutes(fstest.MapFS{
+		"index.html": {Data: []byte(`<html><head></head><body><div id="app"></div></body></html>`)},
+		"about.html": {Data: page},
+	}, "/"))
+
+	for _, target := range []string{"/about", "/about.html"} {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, target, nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code, target)
+		body := rec.Body.String()
+		for _, want := range []string{
+			"<title>OpenPost 소개 / About OpenPost | post.aidenahn.com</title>",
+			`lang="ko"`,
+			`lang="en"`,
+			`href="/privacy"`,
+			`href="/terms"`,
+			`href="/"`,
+			"https://github.com/getopenpost/openpost",
+			"https://www.aidenahn.com/about",
+			"youtube.upload",
+			"youtube.force-ssl",
+			"yt-analytics.readonly",
+			"Google API Services User Data Policy",
+		} {
+			require.Contains(t, body, want, target)
+		}
+		require.NotContains(t, body, "mailto:", "page must not publish an email address")
+	}
 }
