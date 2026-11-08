@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -84,4 +85,12 @@ func TestNewHTTPErrorRejectsUnsafeCodes(t *testing.T) {
 			require.Equal(t, test.wantSubcode, providerErr.Subcode)
 		})
 	}
+}
+
+func TestErrorTypeChainNamesTypesWithoutMessageText(t *testing.T) {
+	err := fmt.Errorf("media upload failed for m1: %w", &tiktokPendingError{result: PublishResult{ProviderState: "processing"}})
+	chain := ErrorTypeChain(err)
+	require.Equal(t, "*fmt.wrapError > *platform.tiktokPendingError", chain)
+	require.NotContains(t, chain, "m1")
+	require.Empty(t, ErrorTypeChain(nil))
 }
