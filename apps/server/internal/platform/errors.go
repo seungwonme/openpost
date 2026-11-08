@@ -85,6 +85,27 @@ func ProviderErrorDiagnostic(err error) string {
 	return strings.Join(parts, " ")
 }
 
+// ErrorTypeChain names the Go types in an error's unwrap chain, outermost
+// first. It never includes error text, so it is safe to log when the message
+// could carry provider bodies or URLs. Classification can hide a non-HTTP
+// failure behind a generic kind; the chain shows which code path produced it.
+func ErrorTypeChain(err error) string {
+	var types []string
+	for depth := 0; err != nil && depth < 16; depth++ {
+		types = append(types, fmt.Sprintf("%T", err))
+		if joined, ok := err.(interface{ Unwrap() []error }); ok {
+			children := joined.Unwrap()
+			if len(children) == 0 {
+				break
+			}
+			err = children[0]
+			continue
+		}
+		err = errors.Unwrap(err)
+	}
+	return strings.Join(types, " > ")
+}
+
 func firstSafeProviderCode(candidates []any) string {
 	for _, candidate := range candidates {
 		var code string
