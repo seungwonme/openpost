@@ -111,7 +111,7 @@ OpenPost saves the error type, status, safe error code, next retry time, and the
 ## YouTube
 
 - Enable YouTube Data API v3 in the Google Cloud project.
-- OpenPost requests `youtube.readonly`, `youtube.upload`, `youtube`, `yt-analytics.readonly`, and `youtube.force-ssl`. Google profile and email scopes are not required. Comments, replies, and moderation need `youtube.force-ssl`; reconnect the channel after adding or approving scopes.
+- OpenPost requests `youtube.upload`, `youtube.force-ssl`, and `yt-analytics.readonly`. Channels connected earlier may also hold `youtube` and `youtube.readonly`, which OpenPost still accepts. Google profile and email scopes are not required. Comments, replies, and moderation need `youtube.force-ssl`; reconnect the channel after adding or approving scopes.
 - `google account has no YouTube channels` means the authenticated Google account has no eligible channel available to the OAuth app.
 - `invalidTitle` usually means the first non-empty line of the post or YouTube variant is invalid for a video title.
 - Uploads are private by default and support one video attachment in the current adapter.

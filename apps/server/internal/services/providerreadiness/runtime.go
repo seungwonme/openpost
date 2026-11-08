@@ -453,7 +453,9 @@ func RequiredScopesForSubject(subject Subject) []string {
 		}
 		return []string{"instagram_basic", "instagram_content_publish"}
 	case capabilities.ProviderYouTube:
-		return []string{"https://www.googleapis.com/auth/youtube", "https://www.googleapis.com/auth/youtube.upload"}
+		// videos.insert accepts youtube.upload alone. Older grants also hold the
+		// broader youtube scope, which is no longer required.
+		return []string{"https://www.googleapis.com/auth/youtube.upload"}
 	case capabilities.ProviderTikTok:
 		if strings.HasPrefix(subject.PolicyMode, "tiktok.upload") {
 			return []string{"user.info.basic", "video.upload"}

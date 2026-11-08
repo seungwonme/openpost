@@ -142,6 +142,10 @@ func TestAboutPageServedAsStaticHTML(t *testing.T) {
 		} {
 			require.Contains(t, body, want, target)
 		}
+		// Scopes the app no longer requests must not be advertised.
+		for _, dropped := range []string{"<code>youtube</code>", "<code>youtube.readonly</code>"} {
+			require.NotContains(t, body, dropped, target)
+		}
 		require.NotContains(t, body, "mailto:", "page must not publish an email address")
 	}
 }

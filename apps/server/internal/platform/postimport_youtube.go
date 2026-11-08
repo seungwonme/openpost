@@ -16,10 +16,11 @@ type nativeYouTubeCursor struct {
 }
 
 func (y *YouTubeAdapter) NativePostSupport() NativePostSupport {
-	return nativePostSupport("https://www.googleapis.com/auth/youtube.readonly")
+	return nativePostSupport(youtubeCommentScope)
 }
 func (y *YouTubeAdapter) ResolveAccountNativePostSupport(input NativePostAccountContext) NativePostSupport {
-	// Google grants either the read-only scope or a superset used for publishing.
+	// New connections hold youtube.force-ssl. Accounts connected before the
+	// scope set was reduced hold the read-only or full management scope instead.
 	for _, scope := range strings.Fields(input.GrantedScopes) {
 		if scope == "https://www.googleapis.com/auth/youtube" || scope == "https://www.googleapis.com/auth/youtube.force-ssl" || scope == "https://www.googleapis.com/auth/youtube.readonly" {
 			return nativePostSupport()
