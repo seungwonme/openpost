@@ -93,6 +93,7 @@ export function stepFields(kind: Step['kind'], inputs?: Step['inputs']): FieldSp
 		private_comment_reply: () => [
 			field('engagement_id', m.workflows_comment_id(), required),
 			field('text', m.workflows_comment_saved(), { ...required, multiline: true }),
+			field('quick_reply_title', m.workflows_quick_reply_title()),
 			field('delivery', m.workflows_comment_delivery(), {
 				...required,
 				options: [

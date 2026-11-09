@@ -32,6 +32,9 @@ func (s *Service) RunCollector(ctx context.Context) {
 		if err := s.enqueueActiveAccounts(ctx); err != nil && ctx.Err() == nil {
 			log.Printf("schedule active inbox collection: %v", err)
 		}
+		if err := s.enqueueWaitingAccounts(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("schedule collection for waiting campaigns: %v", err)
+		}
 		select {
 		case <-ctx.Done():
 			return

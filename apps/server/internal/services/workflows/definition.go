@@ -40,6 +40,9 @@ func Validate(def Definition, complete bool) error {
 	return validator.walk(def.Steps, map[string]bool{"source": true}, 0)
 }
 func validateSource(source Source) error {
+	if err := validateCommentBackfill(source); err != nil {
+		return err
+	}
 	switch source.Kind {
 	case "comment_received":
 		return validateCommentSource(source)
@@ -446,7 +449,7 @@ func isEmptyText(value any) bool {
 }
 
 func jsonInput(kind, field string) bool {
-	return kind == KindFields && field == "fields" || kind == KindHTTP && (field == "headers" || field == "query") || kind == KindCode && field == "data" || slices.Contains([]string{KindFilter, KindSort, KindLimit}, kind) && field == "items" || kind == KindMerge && (field == "first" || field == "second") || kind == KindMessageSequence && field == "messages"
+	return kind == KindFields && field == "fields" || kind == KindHTTP && (field == "headers" || field == "query") || kind == KindCode && field == "data" || slices.Contains([]string{KindFilter, KindSort, KindLimit}, kind) && field == "items" || kind == KindMerge && (field == "first" || field == "second") || kind == KindMessageSequence && (field == "messages" || field == "follow_gate")
 }
 
 func validateCommentSource(source Source) error {
@@ -493,7 +496,7 @@ func validateCommentKeywords(source Source) error {
 
 func validateCommentStep(step Step) error {
 	for name := range step.Inputs {
-		if !slices.Contains([]string{"engagement_id", "text", "channel", "delivery"}, name) {
+		if !slices.Contains([]string{"engagement_id", "text", "channel", "delivery", "quick_reply_title"}, name) {
 			return invalid("unsupported comment reply field: " + name)
 		}
 	}
@@ -507,5 +510,5 @@ func validateCommentStep(step Step) error {
 		}
 	}
 
-	return nil
+	return validateQuickReplyTitle(step)
 }

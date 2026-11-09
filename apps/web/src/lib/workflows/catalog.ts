@@ -3,6 +3,7 @@ import { outputFields, type Reference } from './fields';
 import type { Definition, Step, Value, WorkflowData } from './api';
 import type { ThemeIconRole } from '$lib/themes';
 import { m } from '$lib/paraglide/messages';
+import { followGateTemplates } from './message-follow-gate-template';
 const literal = (value: Value['literal']): Value => ({ literal: value });
 const reference = (reference: string): Value => ({ reference });
 export type NodeCategory = 'triggers' | 'ai' | 'flow' | 'content' | 'tools' | 'data';
@@ -347,6 +348,7 @@ export function templates(): {
 	});
 	return [
 		...commentTemplates(),
+		...followGateTemplates(),
 		...messageTemplates(),
 		{
 			id: 'digest',

@@ -176,7 +176,7 @@ func (m metaMessagingAdapter) fetch(ctx context.Context, token string, input Fet
 func (m metaMessagingAdapter) send(ctx context.Context, token string, input SendMessageRequest) (SendMessageResult, error) {
 	payload := map[string]any{
 		"recipient":    map[string]string{"id": input.CounterpartRemoteID},
-		"message":      map[string]string{"text": strings.TrimSpace(input.Body)},
+		"message":      metaOutgoingMessage(input),
 		"access_token": token,
 	}
 	if !m.instagram {

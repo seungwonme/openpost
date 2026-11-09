@@ -48,7 +48,7 @@ func (s *Service) wakeRespondedRuns(ctx context.Context, now time.Time) error {
 	_, err := s.db.NewUpdate().Model((*runRecord)(nil)).Set("wake_at = ?", now).
 		Where("state = ? AND wake_at > ?", StateWaiting, now).
 		Where(`id IN (SELECT w.run_id FROM message_sequence_waits w WHERE
-			EXISTS (SELECT 1 FROM conversations c JOIN direct_messages d ON d.conversation_id = c.id WHERE c.social_account_id = w.account_id AND c.counterpart_remote_id = w.author_remote_id AND c.platform = 'instagram' AND d.direction = 'inbound' AND d.deleted_at IS NULL AND d.remote_created_at > w.replied_at AND d.remote_created_at <= w.respond_by)
+			EXISTS (SELECT 1 FROM conversations c JOIN direct_messages d ON d.conversation_id = c.id WHERE c.social_account_id = w.account_id AND c.counterpart_remote_id = w.author_remote_id AND c.platform = 'instagram' AND d.direction = 'inbound' AND d.deleted_at IS NULL AND d.remote_created_at > w.replied_at AND d.remote_created_at <= w.respond_by AND (w.response_text = '' OR TRIM(d.body) = w.response_text))
 			OR EXISTS (SELECT 1 FROM engagement_automation_optouts o WHERE o.social_account_id = w.account_id AND o.author_remote_id = w.author_remote_id)
 			OR EXISTS (SELECT 1 FROM engagement_items i WHERE i.id = w.item_id AND (i.automation_stopped_at IS NOT NULL OR i.deleted_at IS NOT NULL)))`).Exec(ctx)
 	if err != nil {
@@ -168,11 +168,11 @@ func MessageResponseWindow(value any) (time.Duration, error) {
 
 func validateMessageSequenceStep(step Step) error {
 	for name := range step.Inputs {
-		if !slices.Contains([]string{"engagement_id", "message_id", "messages", "delivery", "response_window_minutes"}, name) {
+		if !slices.Contains([]string{"engagement_id", "message_id", "messages", "delivery", "response_window_minutes", "follow_gate"}, name) {
 			return invalid("unsupported follow-up field: " + name)
 		}
 	}
-	for _, name := range []string{"messages", "delivery", "response_window_minutes"} {
+	for _, name := range []string{"messages", "delivery", "response_window_minutes", "follow_gate"} {
 		if step.Inputs[name].Reference != "" {
 			return invalid("choose follow-up " + strings.ReplaceAll(name, "_", " ") + " directly")
 		}
@@ -181,6 +181,9 @@ func validateMessageSequenceStep(step Step) error {
 		return invalid("choose review or automatic delivery")
 	}
 	if _, err := ParseMessageSequence(step.Inputs["messages"].Literal); err != nil {
+		return err
+	}
+	if _, err := ParseFollowGate(step.Inputs["follow_gate"].Literal); err != nil {
 		return err
 	}
 	_, err := MessageResponseWindow(step.Inputs["response_window_minutes"].Literal)
@@ -217,5 +220,5 @@ func (w messageStepWalker) validateSequence(step Step, path messagePath) error {
 	if delay >= messageWindowMinutes {
 		return invalid(step.Name + ": these delays outlast Instagram's 24 hour messaging window")
 	}
-	return nil
+	return validateFollowGate(step, w.source, messages)
 }

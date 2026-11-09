@@ -1241,15 +1241,18 @@
 												</p>{:else if messageAttachments.length === 0}<p class="text-sm italic">
 													{m.messages_no_content()}
 												</p>{/if}
-											{#each messageAttachments as attachment (attachment.url)}
-												<a
-													class="mt-2 block break-all underline"
-													href={attachment.url}
-													target="_blank"
-													rel="noreferrer"
-												>
-													{attachment.name || attachment.type}
-												</a>
+											{#each messageAttachments as attachment (attachment.url + attachment.type)}
+												{#if attachment.type === 'quick_reply'}<span
+														class="mt-2 inline-block rounded-full border px-2 py-0.5 text-xs"
+														>{attachment.name}</span
+													>{:else}<a
+														class="mt-2 block break-all underline"
+														href={attachment.url}
+														target="_blank"
+														rel="noreferrer"
+													>
+														{attachment.name || attachment.type}
+													</a>{/if}
 											{/each}
 											<p
 												class={[

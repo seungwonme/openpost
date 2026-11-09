@@ -27307,6 +27307,12 @@
 					"include_prereleases": {
 						"type": "boolean"
 					},
+					"include_recent_comments_hours": {
+						"format": "int64",
+						"maximum": 168,
+						"minimum": 0,
+						"type": "integer"
+					},
 					"interval_minutes": {
 						"format": "int64",
 						"maximum": 43200,

@@ -15,6 +15,10 @@ import (
 // Read canonical Inbox inventory. Provider discovery and retries stay in the
 // engagement collector; opening or polling a workflow never fetches comments.
 func (s *Service) commentItems(ctx context.Context, workspaceID string, source Source, since time.Time, record *workflowRecord) ([]SourceItem, error) {
+	started := since
+	if record != nil {
+		since = commentAdmissionSince(started, source, time.Now().UTC())
+	}
 	var rows []models.EngagementItem
 	query := s.db.NewSelect().Model(&rows).Where("workspace_id = ? AND kind = ? AND is_ours = ? AND deleted_at IS NULL AND hidden = ?", workspaceID, "comment", false, false).
 		Where("social_account_id IN (?)", bun.List(source.AccountIDs)).Where("remote_created_at >= ?", since).
@@ -40,6 +44,7 @@ func (s *Service) commentItems(ctx context.Context, workspaceID string, source S
 	}
 	if record != nil {
 		query = query.Where("NOT EXISTS (SELECT 1 FROM workflow_events e WHERE e.workflow_id = ? AND e.source_fingerprint = ? AND e.event_key = engagement_item.id)", record.ID, record.SourceFingerprint)
+		query = commentBackfillFilter(query, source, started)
 	}
 	if err := query.Scan(ctx); err != nil {
 		return nil, err
@@ -156,7 +161,7 @@ func commentPhraseMatches(body, keyword string) bool {
 }
 
 func commentCandidateMatches(ctx context.Context, db bun.IDB, candidate workflowRecord, source Source, item models.EngagementItem) (bool, error) {
-	if source.Kind != "comment_received" || !slices.Contains(source.AccountIDs, item.SocialAccountID) || candidate.SourceStartedAt == nil || item.RemoteCreatedAt.Before(*candidate.SourceStartedAt) || item.CreatedAt.Before(*candidate.SourceStartedAt) {
+	if source.Kind != "comment_received" || !slices.Contains(source.AccountIDs, item.SocialAccountID) || candidate.SourceStartedAt == nil || !commentAdmitted(*candidate.SourceStartedAt, source, item, time.Now().UTC()) {
 		return false, nil
 	}
 	if source.TopLevelOnly && item.ParentRemoteID != "" {

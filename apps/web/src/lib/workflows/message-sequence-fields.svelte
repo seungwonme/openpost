@@ -4,6 +4,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import type { Step, Value } from './api';
+	import MessageFollowGateFields from './message-follow-gate-fields.svelte';
 	import {
 		maxSequenceMessages,
 		sequenceMessages,
@@ -89,3 +90,4 @@
 			>{m.workflows_message_sequence_add()}</Button
 		>{/if}
 </fieldset>
+{#if step.inputs?.engagement_id}<MessageFollowGateFields {step} {readonly} {oninput} />{/if}

@@ -17,6 +17,7 @@
 	import type { Source } from './api';
 	import { m } from '$lib/paraglide/messages';
 	import Disclosure from '$lib/components/disclosure.svelte';
+	import CommentRecentHoursField from './comment-recent-hours-field.svelte';
 	let {
 		source,
 		accounts,
@@ -238,5 +239,6 @@
 				onCheckedChange={(checked) => onchange({ ...source, top_level_only: checked })}
 			/>{m.workflows_comment_top_level()}</label
 		>
+		<CommentRecentHoursField {source} {onchange} />
 	</Disclosure>
 </div>

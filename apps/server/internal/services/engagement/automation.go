@@ -40,6 +40,7 @@ type AutomationReplyRequest struct {
 	Authority                                                  workspaceaccess.StoredAuthority
 	WorkflowID, RunID, StepID, ItemID, Channel, Body, Delivery string
 	Approve                                                    bool
+	QuickReplies                                               []platform.QuickReply
 }
 
 // A workflow effect converges onto one owned delivery. Claims survive deleted
@@ -216,7 +217,7 @@ func (s *Service) advanceAutomationDelivery(ctx context.Context, tx bun.Tx, item
 	}
 	return nil
 }
-func (s *Service) queueAutomationJob(ctx context.Context, tx bun.Tx, item models.EngagementItem, reply AutomationReply) (string, error) {
+func (s *Service) queueAutomationJob(ctx context.Context, tx bun.Tx, item models.EngagementItem, reply AutomationReply, quickReplies []platform.QuickReply) (string, error) {
 	action := "reply"
 	if reply.Channel == "private" {
 		action = "private_reply"
@@ -230,6 +231,7 @@ func (s *Service) queueAutomationJob(ctx context.Context, tx bun.Tx, item models
 		return "", err
 	}
 	payload.AutomationID = reply.ID
+	payload.QuickReplies = privateQuickReplies(reply.Channel, quickReplies)
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
@@ -478,7 +480,7 @@ func (s *Service) advanceClaimedAutomationReply(ctx context.Context, tx bun.Tx, 
 		reply.State = "ready"
 	}
 	if reply.State == "ready" && !in.Approve {
-		id, err := s.queueAutomationJob(ctx, tx, item, *reply)
+		id, err := s.queueAutomationJob(ctx, tx, item, *reply, in.QuickReplies)
 		if err != nil {
 			return err
 		}

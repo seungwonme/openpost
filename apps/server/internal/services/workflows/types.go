@@ -94,6 +94,8 @@ type WorkflowSource struct {
 	ConnectionID       string   `json:"connection_id,omitempty"`
 	IncludePrereleases bool     `json:"include_prereleases,omitempty"`
 	AccountIDs         []string `json:"account_ids,omitempty" maxItems:"50"`
+	// Fork: comment campaigns may answer comments from before they started.
+	IncludeRecentCommentsHours int `json:"include_recent_comments_hours,omitempty" minimum:"0" maximum:"168"`
 }
 
 // A whole-value reference preserves its type. Text values may contain field

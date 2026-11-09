@@ -46,6 +46,12 @@ type SequenceMessage struct {
 type CommentSequenceAnchor struct {
 	ItemID, AccountID, AuthorRemoteID string
 	RepliedAt, RespondBy              time.Time
+	// QuickReplyTitle is the quick reply the private reply offered. A follow
+	// check offers it again with its request to follow.
+	QuickReplyTitle string
+	// ResponseText, when set, is the only text that counts as the response:
+	// the quick reply title, when the follow check accepts only a tap.
+	ResponseText string
 }
 
 // SequenceRequest advances one ordered follow-up step. Exactly one of
@@ -57,6 +63,12 @@ type SequenceRequest struct {
 	Messages                                    []SequenceMessage
 	Delivery, ApprovedBody                      string
 	Approve                                     bool
+	// FollowGate holds the first message, sent with a link button, until the
+	// person follows the account. Comment campaigns only.
+	FollowGate *FollowGate
+	// ResponseMessageID is the response a passed follow check chose. It replaces
+	// the search for the earliest response.
+	ResponseMessageID string
 }
 
 // SequenceProgress is the stored position of a sequence after one advance.
@@ -74,6 +86,13 @@ type SequenceProgress struct {
 // a delay can reach a person after one of those changed. A failure is final: the
 // sequence never skips ahead and never repeats an uncertain delivery.
 func (s *Service) AdvanceMessageSequence(ctx context.Context, in SequenceRequest) (SequenceProgress, error) {
+	if in.FollowGate != nil {
+		gated, passed, response, err := s.advanceFollowGate(ctx, in)
+		if err != nil || !passed {
+			return gated, err
+		}
+		in.ResponseMessageID = response
+	}
 	var progress SequenceProgress
 	err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if err := organizationguard.LockWorkspace(ctx, tx, in.Authority.WorkspaceID); err != nil {
@@ -199,12 +218,19 @@ func (s *Service) findSequenceResponse(ctx context.Context, tx bun.Tx, in Sequen
 		return SequenceProgress{State: SequenceStopped, Reason: reason}, models.DirectMessage{}, nil
 	}
 	var response models.DirectMessage
-	err = tx.NewSelect().Model(&response).
+	if in.ResponseMessageID != "" {
+		err = tx.NewSelect().Model(&response).Where("id = ? AND workspace_id = ?", in.ResponseMessageID, in.Authority.WorkspaceID).Scan(ctx)
+		return SequenceProgress{}, response, err
+	}
+	query := tx.NewSelect().Model(&response).
 		Join("JOIN conversations AS c ON c.id = direct_message.conversation_id").
 		Where("direct_message.workspace_id = ? AND direct_message.direction = 'inbound' AND direct_message.deleted_at IS NULL", in.Authority.WorkspaceID).
 		Where("c.social_account_id = ? AND c.counterpart_remote_id = ? AND c.platform = 'instagram'", anchor.AccountID, anchor.AuthorRemoteID).
-		Where("direct_message.remote_created_at > ? AND direct_message.remote_created_at <= ?", anchor.RepliedAt, anchor.RespondBy).
-		Order("direct_message.remote_created_at ASC", "direct_message.id ASC").Limit(1).Scan(ctx)
+		Where("direct_message.remote_created_at > ? AND direct_message.remote_created_at <= ?", anchor.RepliedAt, anchor.RespondBy)
+	if anchor.ResponseText != "" {
+		query = query.Where("TRIM(direct_message.body) = ?", anchor.ResponseText)
+	}
+	err = query.Order("direct_message.remote_created_at ASC", "direct_message.id ASC").Limit(1).Scan(ctx)
 	if err == nil {
 		return SequenceProgress{}, response, nil
 	}
@@ -214,7 +240,10 @@ func (s *Service) findSequenceResponse(ctx context.Context, tx bun.Tx, in Sequen
 	if !s.now().Before(anchor.RespondBy) {
 		return SequenceProgress{State: SequenceNoResponse, Reason: stopReasonNoResponse}, response, nil
 	}
-	if _, err := tx.NewRaw(`INSERT INTO message_sequence_waits(run_id,workspace_id,item_id,account_id,author_remote_id,replied_at,respond_by) VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, in.RunID, in.Authority.WorkspaceID, anchor.ItemID, anchor.AccountID, anchor.AuthorRemoteID, anchor.RepliedAt, anchor.RespondBy).Exec(ctx); err != nil {
+	if _, err := tx.NewRaw(`INSERT INTO message_sequence_waits(run_id,workspace_id,item_id,account_id,author_remote_id,replied_at,respond_by,response_text) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT (run_id) DO UPDATE SET replied_at = excluded.replied_at, respond_by = excluded.respond_by, response_text = excluded.response_text`, in.RunID, in.Authority.WorkspaceID, anchor.ItemID, anchor.AccountID, anchor.AuthorRemoteID, anchor.RepliedAt, anchor.RespondBy, anchor.ResponseText).Exec(ctx); err != nil {
+		return SequenceProgress{}, response, err
+	}
+	if err := s.expediteWaitingCollection(ctx, tx, anchor.AccountID); err != nil {
 		return SequenceProgress{}, response, err
 	}
 	return SequenceProgress{State: SequenceWaitingResponse, WakeAt: anchor.RespondBy}, response, nil
@@ -291,7 +320,11 @@ func (s *Service) advanceSequenceRow(ctx context.Context, tx bun.Tx, trigger mod
 	if body == "" {
 		body = reply.Body
 	}
-	if err := s.advanceClaimedReply(ctx, tx, trigger, conversation, in.request(trigger.ID, body), &reply); err != nil {
+	request := in.request(trigger.ID, body)
+	if reply.SequencePosition == 0 && in.FollowGate != nil {
+		request.Button = in.FollowGate.button()
+	}
+	if err := s.advanceClaimedReply(ctx, tx, trigger, conversation, request, &reply); err != nil {
 		return SequenceProgress{}, err
 	}
 	progress := SequenceProgress{State: reply.State, Reason: reply.Reason, Reply: reply, Sent: reply.SequencePosition}
