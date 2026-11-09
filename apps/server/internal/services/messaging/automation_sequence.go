@@ -243,6 +243,9 @@ func (s *Service) findSequenceResponse(ctx context.Context, tx bun.Tx, in Sequen
 	if _, err := tx.NewRaw(`INSERT INTO message_sequence_waits(run_id,workspace_id,item_id,account_id,author_remote_id,replied_at,respond_by,response_text) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT (run_id) DO UPDATE SET replied_at = excluded.replied_at, respond_by = excluded.respond_by, response_text = excluded.response_text`, in.RunID, in.Authority.WorkspaceID, anchor.ItemID, anchor.AccountID, anchor.AuthorRemoteID, anchor.RepliedAt, anchor.RespondBy, anchor.ResponseText).Exec(ctx); err != nil {
 		return SequenceProgress{}, response, err
 	}
+	if err := s.expediteWaitingCollection(ctx, tx, anchor.AccountID); err != nil {
+		return SequenceProgress{}, response, err
+	}
 	return SequenceProgress{State: SequenceWaitingResponse, WakeAt: anchor.RespondBy}, response, nil
 }
 
