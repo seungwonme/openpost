@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import type { Definition, Step, Value } from './api';
 import { workflowIssues } from './validation';
+import { followGateTemplates } from './message-follow-gate-template';
 
 const commentTrigger: Definition['source'] = {
 	kind: 'comment_received',
@@ -73,4 +74,32 @@ it('explains a follow check the server would reject', () => {
 			messageFollowUp
 		])
 	).toEqual(['A follow check needs the comment trigger and a private reply.']);
+});
+
+it('limits the quick reply title to what Instagram shows', () => {
+	const issues = (title: string) =>
+		workflowIssues({
+			schema: 1,
+			source: commentTrigger,
+			steps: [
+				{
+					...privateReply,
+					inputs: { ...privateReply.inputs, quick_reply_title: { literal: title } }
+				}
+			]
+		}).filter((issue) => issue.field === 'quick_reply_title');
+	expect(issues('팔로우했어요')).toEqual([]);
+	expect(issues('a'.repeat(21))).toHaveLength(1);
+});
+
+it('starts the follow link template with a quick reply and a follow check', () => {
+	const [template] = followGateTemplates();
+	const [ask, link] = template.definition.steps ?? [];
+	expect(ask.inputs?.quick_reply_title).toEqual({ literal: 'I followed' });
+	expect(link.inputs?.follow_gate?.literal).toMatchObject({ button_title: 'Get the guide' });
+	expect(
+		workflowIssues(template.definition)
+			.filter((issue) => issue.node === 'link')
+			.map((issue) => issue.field)
+	).toEqual(['follow_gate']);
 });

@@ -23,6 +23,7 @@
 	import RepostHistory from '$lib/workflows/repost-history.svelte';
 	import GraphPreview from '$lib/workflows/graph-preview.svelte';
 	import CommentCampaignSetup from '$lib/workflows/comment-campaign-setup.svelte';
+	import { followGateTemplateID } from '$lib/workflows/message-follow-gate-template';
 	import RunInspector from '$lib/workflows/run-inspector.svelte';
 	import PageContainer from '$lib/components/page-container.svelte';
 	import DestructiveConfirmDialog from '$lib/components/destructive-confirm-dialog.svelte';
@@ -336,7 +337,11 @@
 								variant="outline"
 								disabled={busy || workspaceCtx.currentWorkspace?.role === 'viewer'}
 								onclick={() => {
-									if (template.definition.source.kind === 'comment_received')
+									// The follow check has fields the quick setup does not show.
+									if (
+										template.definition.source.kind === 'comment_received' &&
+										template.id !== followGateTemplateID
+									)
 										replyTemplate = template;
 									else void create(template.name, template.definition);
 								}}>{m.workflows_use_template()}</Button

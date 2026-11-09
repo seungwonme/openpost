@@ -21,7 +21,13 @@ describe('follow check fields', () => {
 			.getByRole('checkbox', { name: 'Send the link only to people who follow this account' })
 			.click();
 		expect(oninput).toHaveBeenLastCalledWith('follow_gate', {
-			literal: { button_title: '', button_url: 'https://', not_following_text: '', max_checks: 3 }
+			literal: {
+				button_title: 'Get the guide',
+				button_url: 'https://',
+				not_following_text:
+					'We could not see your follow yet. Follow us, then tap "I followed" again.',
+				max_checks: 3
+			}
 		});
 		screen.unmount();
 

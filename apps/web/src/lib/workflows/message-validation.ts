@@ -85,7 +85,12 @@ export function followGate(value: Value['literal']): FollowGate | null {
 }
 
 export function defaultFollowGate(): FollowGate {
-	return { button_title: '', button_url: 'https://', not_following_text: '', max_checks: 3 };
+	return {
+		button_title: m.workflows_follow_gate_button_default(),
+		button_url: 'https://',
+		not_following_text: m.workflows_follow_gate_text_default(),
+		max_checks: 3
+	};
 }
 
 function httpsURL(value: string): boolean {
@@ -98,28 +103,36 @@ function httpsURL(value: string): boolean {
 	}
 }
 
+function withinBytes(text: string): boolean {
+	return text.includes('{{') || new TextEncoder().encode(text).length <= maxMessageBytes;
+}
+
+/** Each authored follow check field, in the order the editor shows them. */
+function followGateFieldIssue(gate: FollowGate): string {
+	const title = [...gate.button_title.trim()].length;
+	const text = gate.not_following_text.trim();
+	const checks = Number.isInteger(gate.max_checks) ? gate.max_checks : 0;
+	if (title === 0 || title > maxButtonTitleLength) return m.workflows_follow_gate_title_issue();
+	if (!httpsURL(gate.button_url)) return m.workflows_follow_gate_url_issue();
+	if (!text || !withinBytes(text)) return m.workflows_follow_gate_text_issue();
+	if (checks < 1 || checks > maxFollowChecks) return m.workflows_follow_gate_checks_issue();
+	return '';
+}
+
 /** The server applies the same rules; this explains them before publishing. */
 function followGateIssue(step: Step, source: Source): string {
 	const gate = followGate(step.inputs?.follow_gate?.literal);
 	if (!gate) return '';
 	if (source.kind !== 'comment_received') return m.workflows_follow_gate_source();
-	const title = gate.button_title.trim();
-	if (!title || [...title].length > maxButtonTitleLength)
-		return m.workflows_follow_gate_title_issue();
-	if (!httpsURL(gate.button_url)) return m.workflows_follow_gate_url_issue();
-	const text = gate.not_following_text.trim();
-	if (!text || (!text.includes('{{') && new TextEncoder().encode(text).length > maxMessageBytes))
-		return m.workflows_follow_gate_text_issue();
-	if (
-		!Number.isInteger(gate.max_checks) ||
-		gate.max_checks < 1 ||
-		gate.max_checks > maxFollowChecks
-	)
-		return m.workflows_follow_gate_checks_issue();
 	const first = sequenceMessages(step.inputs?.messages?.literal)[0]?.text.trim() ?? '';
-	if (!first.includes('{{') && [...first].length > maxButtonTextLength)
-		return m.workflows_follow_gate_first_issue();
-	return '';
+	const firstTooLong = !first.includes('{{') && [...first].length > maxButtonTextLength;
+	return followGateFieldIssue(gate) || (firstTooLong ? m.workflows_follow_gate_first_issue() : '');
+}
+
+/** Instagram truncates a quick reply title after 20 characters. */
+function quickReplyIssue(step: Step): string {
+	const title = String(step.inputs?.quick_reply_title?.literal ?? '').trim();
+	return [...title].length > maxButtonTitleLength ? m.workflows_quick_reply_title_issue() : '';
 }
 
 type MessagePath = { elapsed: number; privateReply: boolean; answered: boolean };
@@ -149,7 +162,10 @@ export function messageActionIssues(definition: Definition): Issue[] {
 			const minutes = Number(step.inputs?.minutes?.literal);
 			if (Number.isFinite(minutes)) next.elapsed += minutes;
 		}
-		if (step.kind === 'private_comment_reply') next.privateReply = true;
+		if (step.kind === 'private_comment_reply') {
+			next.privateReply = true;
+			report(step, 'quick_reply_title', quickReplyIssue(step));
+		}
 		if (step.kind === 'comment_reply' && step.inputs?.channel?.literal === 'private')
 			next.privateReply = true;
 		if (step.kind === 'message_reply' && source.kind === 'message_received') {
