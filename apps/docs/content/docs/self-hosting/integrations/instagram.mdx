@@ -165,7 +165,7 @@ Location search is unavailable for these accounts because it relies on Facebook 
 
 ## Receive comment and message webhooks
 
-Meta sends Instagram comment and message events to your server as webhooks. Without them, OpenPost can read comments and messages only when they are fetched, and Comments and Direct messages stay slow to update. Two parts must be in place: a callback URL and verify token in the Meta dashboard, and a per-account subscription that OpenPost makes for you.
+Meta sends Instagram comment and message events to your server as webhooks. Without them, OpenPost can read comments and messages only when they are fetched, and Comments and Direct messages stay slow to update. Until webhooks arrive, comments on media published outside OpenPost are checked about every five minutes, and messages at least every 15 minutes while an active message workflow watches the account. Two parts must be in place: a callback URL and verify token in the Meta dashboard, and a per-account subscription that OpenPost makes for you.
 
 ### Set the callback in Meta
 
