@@ -21,7 +21,11 @@ func enqueueRun(ctx context.Context, db bun.IDB, record runRecord, runAt time.Ti
 	if err != nil {
 		return err
 	}
-	return enqueue(ctx, db, jobregistry.TypeWorkflowRun, record.WorkspaceID, record.ID+":"+strconv.Itoa(record.Revision), string(payload), runAt)
+	key := record.ID + ":" + strconv.Itoa(record.Revision)
+	if err := enqueue(ctx, db, jobregistry.TypeWorkflowRun, record.WorkspaceID, key, string(payload), runAt); err != nil {
+		return err
+	}
+	return pullRunJobForward(ctx, db, record.WorkspaceID, key, runAt)
 }
 func enqueue(ctx context.Context, db bun.IDB, kind, scope, key, payload string, runAt time.Time) error {
 	job, err := jobregistry.NewJob(kind, payload, runAt)
