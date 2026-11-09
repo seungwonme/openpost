@@ -199,6 +199,9 @@ func (s *Service) syncAccountActivity(ctx context.Context, input accountActivity
 	if err != nil {
 		return s.recordActivityFailure(ctx, state, &platform.HTTPError{StatusCode: http.StatusUnauthorized})
 	}
+	if input.Feed == platform.InstagramCommentsFeed {
+		return s.collectInstagramNativeComments(ctx, input, token)
+	}
 	var pending []string
 	if input.Feed == "reviews" {
 		pending, err = s.dueReviewReplies(ctx, input.AccountID)
