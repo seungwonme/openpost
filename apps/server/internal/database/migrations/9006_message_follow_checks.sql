@@ -12,3 +12,8 @@ CREATE TABLE IF NOT EXISTS message_follow_checks (
   checked_at TIMESTAMP NOT NULL,
   PRIMARY KEY (run_id, step_id, attempt)
 );
+
+-- A run asked to tap a quick reply waits for that title only, so the batched
+-- wake does not wake it for every other message the person sends.
+ALTER TABLE message_sequence_waits
+  ADD COLUMN response_text TEXT NOT NULL DEFAULT '';

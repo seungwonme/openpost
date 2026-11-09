@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/openpost/backend/internal/platform"
 	"github.com/openpost/backend/internal/services/messaging"
 	"github.com/openpost/backend/internal/services/workflows"
 )
@@ -29,7 +30,7 @@ func (a workflowActions) messageSequence(ctx context.Context, in workflows.Effec
 		request.FollowGate = &messaging.FollowGate{ButtonTitle: gate.ButtonTitle, ButtonURL: gate.ButtonURL, NotFollowingText: gate.NotFollowingText, MaxChecks: gate.MaxChecks}
 	}
 	if itemID := workflowText(in.Inputs, "engagement_id"); itemID != "" {
-		if request.Comment, err = a.commentSequenceAnchor(ctx, in, itemID); err != nil {
+		if request.Comment, err = a.commentSequenceAnchor(ctx, in, itemID, gate != nil); err != nil {
 			return workflows.EffectResult{}, err
 		}
 	}
@@ -40,7 +41,7 @@ func (a workflowActions) messageSequence(ctx context.Context, in workflows.Effec
 	return sequenceEffect(progress, approve)
 }
 
-func (a workflowActions) commentSequenceAnchor(ctx context.Context, in workflows.EffectRequest, itemID string) (*messaging.CommentSequenceAnchor, error) {
+func (a workflowActions) commentSequenceAnchor(ctx context.Context, in workflows.EffectRequest, itemID string, followCheck bool) (*messaging.CommentSequenceAnchor, error) {
 	if a.engagement == nil {
 		return nil, errors.New("comment reply automation is unavailable")
 	}
@@ -52,7 +53,12 @@ func (a workflowActions) commentSequenceAnchor(ctx context.Context, in workflows
 	if err != nil {
 		return nil, err
 	}
-	return &messaging.CommentSequenceAnchor{ItemID: reply.ItemID, AccountID: reply.AccountID, AuthorRemoteID: reply.AuthorRemoteID, RepliedAt: reply.SentAt, RespondBy: reply.SentAt.Add(window)}, nil
+	anchor := &messaging.CommentSequenceAnchor{ItemID: reply.ItemID, AccountID: reply.AccountID, AuthorRemoteID: reply.AuthorRemoteID, RepliedAt: reply.SentAt, RespondBy: reply.SentAt.Add(window)}
+	if followCheck {
+		// Only a tap on the private reply's quick reply confirms the follow.
+		anchor.ResponseText = reply.QuickReplyTitle
+	}
+	return anchor, nil
 }
 
 // A policy stop, delivery failure or failed follow check ends the run as failed
@@ -82,4 +88,14 @@ func sequenceEffect(progress messaging.SequenceProgress, approve bool) (workflow
 		return workflows.EffectResult{Stop: true, Output: output}, nil
 	}
 	return workflows.EffectResult{Output: output}, errors.New(progress.Reason)
+}
+
+// commentQuickReplies is the private reply's optional quick reply, which a
+// follow check asks the person to tap.
+func commentQuickReplies(in workflows.EffectRequest) []platform.QuickReply {
+	title := workflows.QuickReplyTitle(in.Inputs["quick_reply_title"])
+	if title == "" {
+		return nil
+	}
+	return []platform.QuickReply{{Title: title, Payload: platform.FollowCheckQuickReplyPayload}}
 }

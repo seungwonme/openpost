@@ -129,3 +129,64 @@ func TestInstagramSendsAButtonTemplate(t *testing.T) {
 	plain := send(t, SendMessageRequest{AccountID: "owner", CounterpartRemoteID: "1784140000000001", Body: "hi"})
 	require.Equal(t, map[string]any{"text": "hi"}, plain["message"], "a message without buttons is unchanged")
 }
+
+// The documented quick reply message, sent as a private reply: recipient is the
+// comment, and tapping the reply posts its title as the person's message.
+const instagramPrivateQuickReplyFixture = `{
+	"recipient": {"comment_id": "17890000000000042"},
+	"message": {
+		"text": "Thanks for commenting! Tap the button once you follow us.",
+		"quick_replies": [{"content_type": "text", "title": "팔로우했어요", "payload": "OPENPOST_FOLLOW_CHECK"}]
+	}
+}`
+
+func TestInstagramPrivateReplyCarriesAQuickReply(t *testing.T) {
+	original := httpClient
+	t.Cleanup(func() { httpClient = original })
+	adapter := NewInstagramAdapter("", "", "")
+	adapter.instagramLogin = true
+	quick := []QuickReply{{Title: "팔로우했어요", Payload: FollowCheckQuickReplyPayload}}
+	t.Run("the request matches the documented payload", func(t *testing.T) {
+		var sent map[string]any
+		httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodPost, req.Method)
+			require.Equal(t, "graph.instagram.com", req.URL.Host)
+			require.Equal(t, "/"+adapter.graphVersion+"/owner/messages", req.URL.Path)
+			require.Equal(t, "Bearer reply-token", req.Header.Get("Authorization"))
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(body, &sent))
+			return jsonResponse(req, `{"recipient_id":"1784140000000001","message_id":"aWdfZAG2"}`), nil
+		})}
+		id, err := adapter.ReplyPrivatelyToCommentWithQuickReplies(context.Background(), "reply-token", "owner", "17890000000000042", "Thanks for commenting! Tap the button once you follow us.", quick)
+		require.NoError(t, err)
+		require.Equal(t, "aWdfZAG2", id)
+		var want map[string]any
+		require.NoError(t, json.Unmarshal([]byte(instagramPrivateQuickReplyFixture), &want))
+		require.Equal(t, want, sent)
+	})
+	t.Run("a rejection is returned, never retried without the quick reply", func(t *testing.T) {
+		requests := 0
+		httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requests++
+			return jsonResponseWithStatus(req, http.StatusBadRequest, `{"error":{"message":"Invalid parameter","type":"IGApiException","code":100}}`), nil
+		})}
+		_, err := adapter.ReplyPrivatelyToCommentWithQuickReplies(context.Background(), "reply-token", "owner", "17890000000000042", "Tap the button", quick)
+		var providerErr *HTTPError
+		require.ErrorAs(t, err, &providerErr)
+		require.Equal(t, http.StatusBadRequest, providerErr.StatusCode)
+		require.Equal(t, 1, requests)
+	})
+	t.Run("a follow request DM repeats the quick reply", func(t *testing.T) {
+		var sent map[string]any
+		httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(body, &sent))
+			return jsonResponse(req, `{"recipient_id":"1784140000000001","message_id":"aWdfZAG3"}`), nil
+		})}
+		_, err := adapter.SendMessage(context.Background(), "send-token", SendMessageRequest{AccountID: "owner", CounterpartRemoteID: "1784140000000001", Body: "Follow us first", QuickReplies: quick})
+		require.NoError(t, err)
+		require.Equal(t, map[string]any{"text": "Follow us first", "quick_replies": []any{map[string]any{"content_type": "text", "title": "팔로우했어요", "payload": "OPENPOST_FOLLOW_CHECK"}}}, sent["message"])
+	})
+}

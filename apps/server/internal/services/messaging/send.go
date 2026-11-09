@@ -336,7 +336,7 @@ func (s *Service) sendMessageThroughFence(
 		AccountID: account.AccountID, RemoteConversationID: conversation.RemoteConversationID,
 		CounterpartRemoteID: conversation.CounterpartRemoteID, CounterpartHandle: conversation.CounterpartHandle,
 		ReplyToRemoteID: message.ReplyToRemoteID, Body: message.Body,
-		Buttons: messageLinkButtons(message.AttachmentsJSON),
+		Buttons: messageLinkButtons(message.AttachmentsJSON), QuickReplies: messageQuickReplies(message.AttachmentsJSON),
 	}
 	fingerprint, err := providerwrite.Fingerprint("messaging-send-v1", request)
 	if err != nil {

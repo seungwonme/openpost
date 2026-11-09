@@ -174,6 +174,8 @@ type engagementActionJob struct {
 	Action            string `json:"action"`
 	Message           string `json:"message,omitempty"`
 	UserID            string `json:"user_id"`
+	// QuickReplies ride on an automated private reply (fork, #35).
+	QuickReplies []platform.QuickReply `json:"quick_replies,omitempty"`
 }
 
 type ProviderCommentActionInput struct {
@@ -951,9 +953,7 @@ func (s *Service) executeEngagementAction(
 ) error {
 	// Preserve the historical namespace so accepted writes fenced before the
 	// module extraction remain idempotent after deployment.
-	fingerprint, err := providerwrite.Fingerprint("engagement-action-v1", map[string]string{
-		"item_id": item.ID, "remote_id": item.RemoteID, "action": input.Action, "message": input.Message,
-	})
+	fingerprint, err := engagementActionFingerprint(item, input)
 	if err != nil {
 		return err
 	}
@@ -2057,6 +2057,9 @@ func validatePrivateCommentAction(item models.EngagementItem, message string) (s
 }
 
 func sendPrivateCommentReply(ctx context.Context, commenter platform.CommentAdapter, token string, account models.SocialAccount, item *models.EngagementItem, input engagementActionJob) (platform.PublishResult, error) {
+	if len(input.QuickReplies) > 0 {
+		return sendPrivateQuickReply(ctx, commenter, token, account, item, input)
+	}
 	adapter, ok := commenter.(platform.PrivateCommentReplyAdapter)
 	if !ok {
 		return platform.PublishResult{}, fmt.Errorf("this provider does not support private comment replies")

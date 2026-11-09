@@ -296,7 +296,7 @@ func (a workflowActions) commentReply(ctx context.Context, in workflows.EffectRe
 		channel = "public"
 		body = "NEEDS_HUMAN"
 	}
-	reply, err := a.engagement.AdvanceAutomationReply(ctx, engagement.AutomationReplyRequest{Authority: in.Authority, WorkflowID: workflowText(in.Inputs, "workflow_id"), RunID: in.RunID, StepID: in.StepID, ItemID: workflowText(in.Inputs, "engagement_id"), Channel: channel, Body: body, Delivery: delivery, Approve: approve})
+	reply, err := a.engagement.AdvanceAutomationReply(ctx, engagement.AutomationReplyRequest{Authority: in.Authority, WorkflowID: workflowText(in.Inputs, "workflow_id"), RunID: in.RunID, StepID: in.StepID, ItemID: workflowText(in.Inputs, "engagement_id"), Channel: channel, Body: body, Delivery: delivery, Approve: approve, QuickReplies: commentQuickReplies(in)})
 	if err != nil {
 		return workflows.EffectResult{}, err
 	}

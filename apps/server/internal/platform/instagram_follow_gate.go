@@ -17,7 +17,20 @@ type MessageButton struct {
 	URL   string `json:"url"`
 }
 
+// QuickReply is one plain-text quick reply. Tapping it posts its title to the
+// conversation as the person's own message, which polling stores like any
+// other message; a webhook also carries the payload.
+type QuickReply struct {
+	Title   string `json:"title"`
+	Payload string `json:"payload"`
+}
+
 const (
+	// FollowCheckQuickReplyPayload marks the quick reply a follow check asks
+	// the person to tap.
+	FollowCheckQuickReplyPayload = "OPENPOST_FOLLOW_CHECK"
+	// QuickReplyTitleLimit is where Instagram truncates a quick reply title.
+	QuickReplyTitleLimit = 20
 	// MessageButtonTextLimit is the template text limit, in characters.
 	MessageButtonTextLimit = 640
 	// MaxMessageButtons is how many buttons one template can carry.
@@ -29,7 +42,7 @@ const (
 func metaOutgoingMessage(input SendMessageRequest) map[string]any {
 	text := strings.TrimSpace(input.Body)
 	if len(input.Buttons) == 0 {
-		return map[string]any{"text": text}
+		return metaTextMessage(text, input.QuickReplies)
 	}
 	buttons := make([]map[string]string, 0, len(input.Buttons))
 	for _, button := range input.Buttons {
@@ -39,6 +52,48 @@ func metaOutgoingMessage(input SendMessageRequest) map[string]any {
 		"type":    "template",
 		"payload": map[string]any{"template_type": "button", "text": text, "buttons": buttons},
 	}}
+}
+
+// metaTextMessage is a text message, with quick replies when there are any.
+func metaTextMessage(text string, quickReplies []QuickReply) map[string]any {
+	message := map[string]any{"text": text}
+	if len(quickReplies) > 0 {
+		replies := make([]map[string]string, 0, len(quickReplies))
+		for _, reply := range quickReplies {
+			replies = append(replies, map[string]string{"content_type": "text", "title": reply.Title, "payload": reply.Payload})
+		}
+		message["quick_replies"] = replies
+	}
+	return message
+}
+
+// PrivateCommentQuickReplyAdapter sends a private reply with quick replies.
+// Instagram does not document quick replies on private replies; a rejection
+// fails the reply instead of resending it without them.
+type PrivateCommentQuickReplyAdapter interface {
+	ReplyPrivatelyToCommentWithQuickReplies(ctx context.Context, token, accountID, commentID, message string, quickReplies []QuickReply) (string, error)
+}
+
+func (i *InstagramAdapter) ReplyPrivatelyToCommentWithQuickReplies(ctx context.Context, token, accountID, commentID, message string, quickReplies []QuickReply) (string, error) {
+	message = strings.TrimSpace(message)
+	if accountID == "" || commentID == "" || message == "" || len(message) > 1000 {
+		return "", errors.New("private Instagram replies require an account, comment and up to 1000 bytes of text")
+	}
+	payload := map[string]any{"recipient": map[string]string{"comment_id": commentID}, "message": metaTextMessage(message, quickReplies)}
+	body, err := DoJSON(ctx, http.MethodPost, i.graphURL(accountID+"/messages"), payload, bearerHeaders(token))
+	if err != nil {
+		return "", err
+	}
+	var response struct {
+		MessageID string `json:"message_id"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return "", err
+	}
+	if response.MessageID == "" {
+		return "", errors.New("the private reply was not confirmed by Instagram; inspect the outcome before sending again")
+	}
+	return response.MessageID, nil
 }
 
 // MessagingUserProfile is what the User Profile API reports about a person

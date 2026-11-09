@@ -70,7 +70,8 @@ type SendMessageRequest struct {
 	Body                 string
 	// Buttons turn the message into a Meta button template. Empty keeps the
 	// request, and its write fingerprint, unchanged.
-	Buttons []MessageButton `json:",omitempty"`
+	Buttons      []MessageButton `json:",omitempty"`
+	QuickReplies []QuickReply    `json:",omitempty"`
 }
 type SendMessageResult struct {
 	RemoteMessageID string

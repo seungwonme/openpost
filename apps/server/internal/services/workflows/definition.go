@@ -493,7 +493,7 @@ func validateCommentKeywords(source Source) error {
 
 func validateCommentStep(step Step) error {
 	for name := range step.Inputs {
-		if !slices.Contains([]string{"engagement_id", "text", "channel", "delivery"}, name) {
+		if !slices.Contains([]string{"engagement_id", "text", "channel", "delivery", "quick_reply_title"}, name) {
 			return invalid("unsupported comment reply field: " + name)
 		}
 	}
@@ -507,5 +507,5 @@ func validateCommentStep(step Step) error {
 		}
 	}
 
-	return nil
+	return validateQuickReplyTitle(step)
 }

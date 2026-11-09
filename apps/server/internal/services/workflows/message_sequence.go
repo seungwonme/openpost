@@ -48,7 +48,7 @@ func (s *Service) wakeRespondedRuns(ctx context.Context, now time.Time) error {
 	_, err := s.db.NewUpdate().Model((*runRecord)(nil)).Set("wake_at = ?", now).
 		Where("state = ? AND wake_at > ?", StateWaiting, now).
 		Where(`id IN (SELECT w.run_id FROM message_sequence_waits w WHERE
-			EXISTS (SELECT 1 FROM conversations c JOIN direct_messages d ON d.conversation_id = c.id WHERE c.social_account_id = w.account_id AND c.counterpart_remote_id = w.author_remote_id AND c.platform = 'instagram' AND d.direction = 'inbound' AND d.deleted_at IS NULL AND d.remote_created_at > w.replied_at AND d.remote_created_at <= w.respond_by)
+			EXISTS (SELECT 1 FROM conversations c JOIN direct_messages d ON d.conversation_id = c.id WHERE c.social_account_id = w.account_id AND c.counterpart_remote_id = w.author_remote_id AND c.platform = 'instagram' AND d.direction = 'inbound' AND d.deleted_at IS NULL AND d.remote_created_at > w.replied_at AND d.remote_created_at <= w.respond_by AND (w.response_text = '' OR TRIM(d.body) = w.response_text))
 			OR EXISTS (SELECT 1 FROM engagement_automation_optouts o WHERE o.social_account_id = w.account_id AND o.author_remote_id = w.author_remote_id)
 			OR EXISTS (SELECT 1 FROM engagement_items i WHERE i.id = w.item_id AND (i.automation_stopped_at IS NOT NULL OR i.deleted_at IS NOT NULL)))`).Exec(ctx)
 	if err != nil {

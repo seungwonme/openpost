@@ -95,19 +95,22 @@ OpenPost repeats the checks above before each message and also stops if someone 
 
 ## Send the link only to followers
 
-A comment campaign can hold its link until the person follows your account. Open **Send follow-up messages** after a **Private comment reply** and turn on **Follow check**.
+A comment campaign can hold its link until the person follows your account. Start from **Workflows → Templates → Send a link to followers**, or open **Send follow-up messages** after a **Private comment reply** and turn on **Follow check**.
 
-1. Write the private reply so it asks the person to reply, for example `Reply to this message to get the link`. Instagram shares whether someone follows you only after they message the account, so a comment alone is not enough.
-2. Write the first follow-up message. It appears above the link button, up to 640 characters.
-3. Enter the **Button title**, up to 20 characters, and the **Button link**, which must start with `https://`. The page behind the link stays public; the check only decides who receives it.
-4. Write the message for people who do not follow yet, for example `Follow us, then reply here again`.
-5. Choose how many times to check, from 1 to 5. The default is 3.
+1. Write the private reply so it asks the person to follow and confirm, for example `If you follow us, tap "I followed" below`. Instagram shares whether someone follows you only after they message the account, so a comment alone is not enough.
+2. In the private reply, set **Quick reply button** to the button the person taps, such as `I followed`, up to 20 characters. Tapping it sends that text as their message, which OpenPost reads whether it arrives by webhook or by the regular message check. With a quick reply button, only that exact text counts as the confirmation; other messages are ignored by the check, and opt-out and takeover still apply. Without one, any reply counts.
+3. Write the first follow-up message. It appears above the link button, up to 640 characters.
+4. Enter the **Button title**, up to 20 characters, and the **Button link**, which must start with `https://`. The page behind the link stays public; the check only decides who receives it.
+5. Write the message for people who do not follow yet, for example `Follow us, then reply here again`.
+6. Choose how many times to check, from 1 to 5. The default is 3.
 
 When the person replies, OpenPost reads their follow status from Instagram:
 
 - **Following.** The first follow-up goes out with the link button, and the rest of the sequence continues as usual.
-- **Not following.** They receive your request to follow. When they reply again within 24 hours of their last reply, OpenPost checks again. After the last check, the run ends without the link and shows why. On that last check, OpenPost sends nothing, because no further check would answer them.
+- **Not following.** They receive your request to follow, with the same quick reply button. When they tap it, or reply when there is no button, within 24 hours of their last reply, OpenPost checks again. After the last check, the run ends without the link and shows why. On that last check, OpenPost sends nothing, because no further check would answer them.
 - **Instagram cannot answer.** The run stops and shows the reason, for example missing permission, an account that blocked yours, or a network failure. OpenPost never treats an unanswered check as "not following", and sends neither the link nor the request to follow.
+
+Instagram does not document quick replies on private replies. If Instagram rejects the button, the private reply fails, the run shows why, and OpenPost does not resend it without the button. Remove the **Quick reply button** and ask people to reply with a word instead.
 
 Each reply is checked once. Replies reach OpenPost through webhooks or through the regular message check, so the follow check works before Meta webhooks are available. A link button opens the page in Instagram's browser and needs no webhook. The request to follow counts toward the limits above like any automated message, and a person taking over the conversation or the comment stops the check.
 

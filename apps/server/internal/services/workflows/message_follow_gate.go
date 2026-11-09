@@ -101,3 +101,30 @@ func validateFollowGate(step Step, source Source, messages []SequenceMessage) er
 	}
 	return nil
 }
+
+// QuickReplyTitle reads the optional quick reply of a private comment reply.
+func QuickReplyTitle(value any) string {
+	title, _ := value.(string)
+	return strings.TrimSpace(title)
+}
+
+// validateQuickReplyTitle allows one plain-text quick reply on a private reply,
+// whose tap a follow check can recognize by its title.
+func validateQuickReplyTitle(step Step) error {
+	binding, ok := step.Inputs["quick_reply_title"]
+	if !ok || (binding.Reference == "" && binding.Literal == nil) {
+		return nil
+	}
+	title, isText := binding.Literal.(string)
+	switch {
+	case binding.Reference != "" || !isText || strings.Contains(title, "{{"):
+		return invalid("enter the quick reply button title directly")
+	case strings.TrimSpace(title) == "":
+		return nil
+	case step.Kind != KindPrivateReply && step.Inputs["channel"].Literal != "private":
+		return invalid("only a private reply can carry a quick reply button")
+	case utf8.RuneCountInString(strings.TrimSpace(title)) > maxButtonTitleRunes:
+		return invalid(fmt.Sprintf("the quick reply button title supports up to %d characters", maxButtonTitleRunes))
+	}
+	return nil
+}

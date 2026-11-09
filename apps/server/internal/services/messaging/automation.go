@@ -92,6 +92,8 @@ type AutomationRequest struct {
 	Approve                                                     bool
 	// Button sends the message as a button template with one link.
 	Button *platform.MessageButton
+	// QuickReplies ride on a text message.
+	QuickReplies []platform.QuickReply
 }
 
 type automationStop struct {
@@ -310,7 +312,7 @@ func (s *Service) deliverClaimedReply(ctx context.Context, tx bun.Tx, conversati
 		if err != nil {
 			return err
 		}
-		if err := attachLinkButton(ctx, tx, message, in.Button); err != nil {
+		if err := attachSendOptions(ctx, tx, message, in.Button, in.QuickReplies); err != nil {
 			return err
 		}
 		reply.MessageID, reply.State = message.ID, AutomationSending

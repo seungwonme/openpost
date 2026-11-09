@@ -30,6 +30,8 @@ const (
 
 	// linkButtonAttachment marks the button an outbound message is sent with.
 	linkButtonAttachment = "link_button"
+	// quickReplyAttachment marks the quick reply an outbound message offers.
+	quickReplyAttachment = "quick_reply"
 
 	stopReasonNoFollowReply = "The person did not reply after being asked to follow, so the link was not sent."
 	followReadFailed        = "OpenPost could not read whether this person follows the account, so the link was not sent"
@@ -227,6 +229,11 @@ func (s *Service) advanceFollowRequest(ctx context.Context, tx bun.Tx, in Sequen
 		return SequenceProgress{}, time.Time{}, err
 	}
 	request := in.request(trigger.ID, strings.TrimSpace(in.FollowGate.NotFollowingText))
+	// The request to follow offers the same quick reply again, so the person
+	// can confirm by tapping instead of typing.
+	if title := in.Comment.ResponseText; title != "" {
+		request.QuickReplies = []platform.QuickReply{{Title: title, Payload: platform.FollowCheckQuickReplyPayload}}
+	}
 	request.StepID = followCheckStepID(in.StepID, check.Attempt)
 	var reply AutomationMessage
 	err = tx.NewSelect().Model(&reply).Where("run_id = ? AND step_id = ? AND sequence_position = 0", in.RunID, request.StepID).Scan(ctx)
@@ -330,13 +337,20 @@ func linkButtonIssue(button *platform.MessageButton, body string) string {
 	return ""
 }
 
-// attachLinkButton stores the button with the outbound message, so the send
-// job, a retry and Inbox all read the same button.
-func attachLinkButton(ctx context.Context, db bun.IDB, message *models.DirectMessage, button *platform.MessageButton) error {
-	if button == nil {
+// attachSendOptions stores the button or quick reply with the outbound
+// message, so the send job, a retry and Inbox all read the same ones.
+func attachSendOptions(ctx context.Context, db bun.IDB, message *models.DirectMessage, button *platform.MessageButton, quickReplies []platform.QuickReply) error {
+	var attachments []platform.MessageAttachment
+	if button != nil {
+		attachments = append(attachments, platform.MessageAttachment{Type: linkButtonAttachment, URL: button.URL, Name: button.Title})
+	}
+	for _, reply := range quickReplies {
+		attachments = append(attachments, platform.MessageAttachment{Type: quickReplyAttachment, Name: reply.Title})
+	}
+	if len(attachments) == 0 {
 		return nil
 	}
-	encoded, err := json.Marshal([]platform.MessageAttachment{{Type: linkButtonAttachment, URL: button.URL, Name: button.Title}})
+	encoded, err := json.Marshal(attachments)
 	if err != nil {
 		return err
 	}
@@ -345,16 +359,35 @@ func attachLinkButton(ctx context.Context, db bun.IDB, message *models.DirectMes
 	return err
 }
 
-func messageLinkButtons(attachmentsJSON string) []platform.MessageButton {
+func outboundAttachments(attachmentsJSON, kind string) []platform.MessageAttachment {
 	var attachments []platform.MessageAttachment
 	if json.Unmarshal([]byte(attachmentsJSON), &attachments) != nil {
 		return nil
 	}
-	var buttons []platform.MessageButton
+	var matching []platform.MessageAttachment
 	for _, attachment := range attachments {
-		if attachment.Type == linkButtonAttachment && len(buttons) < platform.MaxMessageButtons {
+		if attachment.Type == kind {
+			matching = append(matching, attachment)
+		}
+	}
+	return matching
+}
+
+func messageLinkButtons(attachmentsJSON string) []platform.MessageButton {
+	var buttons []platform.MessageButton
+	for _, attachment := range outboundAttachments(attachmentsJSON, linkButtonAttachment) {
+		if len(buttons) < platform.MaxMessageButtons {
 			buttons = append(buttons, platform.MessageButton{Title: attachment.Name, URL: attachment.URL})
 		}
 	}
 	return buttons
+}
+
+// Only a follow check stores quick replies, so they carry its payload.
+func messageQuickReplies(attachmentsJSON string) []platform.QuickReply {
+	var replies []platform.QuickReply
+	for _, attachment := range outboundAttachments(attachmentsJSON, quickReplyAttachment) {
+		replies = append(replies, platform.QuickReply{Title: attachment.Name, Payload: platform.FollowCheckQuickReplyPayload})
+	}
+	return replies
 }

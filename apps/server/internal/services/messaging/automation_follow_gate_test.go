@@ -77,9 +77,14 @@ func (f followGateFixture) setFollowing(following bool) {
 // webhooks: the messages sync job reads the inbox and stores what is new.
 func (f followGateFixture) poll(t *testing.T, id string, at time.Time) {
 	t.Helper()
+	f.pollText(t, id, at, "done")
+}
+
+func (f followGateFixture) pollText(t *testing.T, id string, at time.Time, body string) {
+	t.Helper()
 	*f.polled = []platform.ProviderConversation{{
 		ID: "remote-thread", CounterpartRemoteID: "reader", LastMessageAt: at, LastRemoteMessageID: id, ReplyWindowExpiresAt: at.Add(24 * time.Hour),
-		Messages: []platform.ProviderMessage{{ID: id, Direction: "inbound", AuthorRemoteID: "reader", Body: "done", RemoteCreatedAt: at}},
+		Messages: []platform.ProviderMessage{{ID: id, Direction: "inbound", AuthorRemoteID: "reader", Body: body, RemoteCreatedAt: at}},
 	}}
 	require.NoError(t, f.s.HandleJob(t.Context(), JobTypeMessagesSync, `{"id":"account"}`))
 	stored, err := f.db.NewSelect().Model((*models.DirectMessage)(nil)).Where("remote_message_id = ?", id).Exists(t.Context())
@@ -226,4 +231,43 @@ func TestFollowGateRejectsLinkTextOverTheTemplateLimit(t *testing.T) {
 	assert.Equal(t, SequenceStopped, stopped.State)
 	assert.Contains(t, stopped.Reason, "640 characters")
 	assert.Empty(t, *f.requests)
+}
+
+// Tapping the quick reply posts its title as the person's message. Polling
+// stores it like any other message, so only that text confirms the follow.
+func TestFollowGateWaitsForTheQuickReplyTap(t *testing.T) {
+	f := newFollowGateFixture(t)
+	f.in.Comment.ResponseText = "팔로우했어요"
+	f.setFollowing(false)
+
+	f.pollText(t, "mid.question", f.now.Add(-2*time.Minute), "what is this?")
+	waiting := f.advanceSequence(t, f.in)
+	assert.Equal(t, SequenceWaitingResponse, waiting.State, "other text is not the confirmation")
+	assert.Empty(t, *f.profiles)
+	var wait struct{ ResponseText string }
+	require.NoError(t, f.db.NewRaw(`SELECT response_text FROM message_sequence_waits WHERE run_id = 'run'`).Scan(t.Context(), &wait))
+	assert.Equal(t, "팔로우했어요", wait.ResponseText, "the batched wake ignores other messages too")
+
+	f.pollText(t, "mid.tap", f.now.Add(-time.Minute), "팔로우했어요")
+	asking := f.advanceSequence(t, f.in)
+	require.Equal(t, AutomationSending, asking.State)
+	assert.Equal(t, []string{"reader"}, *f.profiles)
+	require.NoError(t, f.runSendJob(t, asking.Reply.MessageID))
+	require.Len(t, *f.requests, 1)
+	assert.Equal(t, "Follow us, then reply here again.", (*f.requests)[0].Body)
+	assert.Equal(t, []platform.QuickReply{{Title: "팔로우했어요", Payload: platform.FollowCheckQuickReplyPayload}}, (*f.requests)[0].QuickReplies, "the request to follow offers the same button again")
+	assert.Equal(t, "mid.tap", f.message(t, asking.Reply.TriggerMessageID).RemoteMessageID)
+
+	*f.now = f.now.Add(10 * time.Minute)
+	f.setFollowing(true)
+	f.pollText(t, "mid.chat", f.now.Add(-2*time.Minute), "ok I followed")
+	assert.Equal(t, SequenceWaitingResponse, f.advanceSequence(t, f.in).State)
+	assert.Len(t, *f.profiles, 1)
+	f.pollText(t, "mid.tap2", f.now.Add(-time.Minute), " 팔로우했어요 ")
+	link := f.advanceSequence(t, f.in)
+	require.Equal(t, AutomationSending, link.State)
+	require.NoError(t, f.runSendJob(t, link.Reply.MessageID))
+	require.Len(t, *f.requests, 2)
+	assert.Equal(t, []platform.MessageButton{{Title: "Open guide", URL: "https://example.com/guide"}}, (*f.requests)[1].Buttons)
+	assert.Empty(t, (*f.requests)[1].QuickReplies)
 }
