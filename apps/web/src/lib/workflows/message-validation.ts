@@ -58,6 +58,70 @@ function sequenceListValid(messages: SequenceMessage[]): boolean {
 	);
 }
 
+export type FollowGate = {
+	button_title: string;
+	button_url: string;
+	not_following_text: string;
+	max_checks: number;
+};
+
+export const maxFollowChecks = 5;
+export const maxButtonTitleLength = 20;
+const maxButtonTextLength = 640;
+
+const followGateSchema = z.object({
+	button_title: z.string().default(''),
+	button_url: z.string().default(''),
+	not_following_text: z.string().default(''),
+	max_checks: z.number().default(3)
+});
+
+/** A follow check is stored as an object, or as text from a JSON import. No value means off. */
+export function followGate(value: Value['literal']): FollowGate | null {
+	if (value === null || value === undefined || value === '') return null;
+	const parsed = followGateSchema.safeParse(value);
+	if (parsed.success) return parsed.data;
+	return sequenceTextSchema.pipe(followGateSchema).safeParse(value).data ?? null;
+}
+
+export function defaultFollowGate(): FollowGate {
+	return { button_title: '', button_url: 'https://', not_following_text: '', max_checks: 3 };
+}
+
+function httpsURL(value: string): boolean {
+	if (value.includes('{{')) return false;
+	try {
+		const url = new URL(value.trim());
+		return url.protocol === 'https:' && url.hostname !== '';
+	} catch {
+		return false;
+	}
+}
+
+/** The server applies the same rules; this explains them before publishing. */
+function followGateIssue(step: Step, source: Source): string {
+	const gate = followGate(step.inputs?.follow_gate?.literal);
+	if (!gate) return '';
+	if (source.kind !== 'comment_received') return m.workflows_follow_gate_source();
+	const title = gate.button_title.trim();
+	if (!title || [...title].length > maxButtonTitleLength)
+		return m.workflows_follow_gate_title_issue();
+	if (!httpsURL(gate.button_url)) return m.workflows_follow_gate_url_issue();
+	const text = gate.not_following_text.trim();
+	if (!text || (!text.includes('{{') && new TextEncoder().encode(text).length > maxMessageBytes))
+		return m.workflows_follow_gate_text_issue();
+	if (
+		!Number.isInteger(gate.max_checks) ||
+		gate.max_checks < 1 ||
+		gate.max_checks > maxFollowChecks
+	)
+		return m.workflows_follow_gate_checks_issue();
+	const first = sequenceMessages(step.inputs?.messages?.literal)[0]?.text.trim() ?? '';
+	if (!first.includes('{{') && [...first].length > maxButtonTextLength)
+		return m.workflows_follow_gate_first_issue();
+	return '';
+}
+
 type MessagePath = { elapsed: number; privateReply: boolean; answered: boolean };
 
 function sequenceIssue(step: Step, source: Source, path: MessagePath): string {
@@ -92,8 +156,10 @@ export function messageActionIssues(definition: Definition): Issue[] {
 			if (next.elapsed >= messageWindowMinutes)
 				report(step, 'text', m.workflows_message_delay_window());
 		}
-		if (step.kind === 'message_sequence')
+		if (step.kind === 'message_sequence') {
 			report(step, 'messages', sequenceIssue(step, source, next));
+			report(step, 'follow_gate', followGateIssue(step, source));
+		}
 		if (step.kind === 'message_reply' || step.kind === 'message_sequence') {
 			if (next.answered)
 				report(
