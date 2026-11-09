@@ -10273,6 +10273,8 @@
 	"workflows_comment_contains": "Contains text",
 	"workflows_comment_daily_limit": "Maximum runs per day",
 	"workflows_comment_top_level": "Only top-level comments",
+	"workflows_comment_recent_hours": "Also include comments from the last N hours",
+	"workflows_comment_recent_hours_help": "Answers matching comments written up to this many hours before the campaign started, once each. Comments someone already answered are skipped. Use 0 to answer only new comments; the most is 168 hours (7 days).",
 	"workflows_comment_post": "Post or Reel",
 	"workflows_comment_any_post": "All available posts",
 	"workflows_comment_posts_help": "Choose a published OpenPost post or an imported Instagram post. Incoming comments on other Instagram media require the comments webhook.",

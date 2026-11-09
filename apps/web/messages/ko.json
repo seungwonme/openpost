@@ -10273,6 +10273,8 @@
 	"workflows_comment_contains": "Contains text",
 	"workflows_comment_daily_limit": "Maximum runs per day",
 	"workflows_comment_top_level": "Only top-level comments",
+	"workflows_comment_recent_hours": "최근 N시간 댓글도 포함",
+	"workflows_comment_recent_hours_help": "캠페인을 시작하기 전 이 시간 안에 달린 조건에 맞는 댓글에도 한 번씩 답합니다. 이미 답한 댓글은 건너뜁니다. 0이면 새 댓글에만 답하고, 최대 168시간(7일)까지 넣을 수 있습니다.",
 	"workflows_comment_post": "Post or Reel",
 	"workflows_comment_any_post": "All available posts",
 	"workflows_comment_posts_help": "Choose a published OpenPost post or an imported Instagram post. Incoming comments on other Instagram media require the comments webhook.",

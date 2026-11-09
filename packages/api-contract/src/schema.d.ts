@@ -18189,6 +18189,8 @@ export interface components {
             excluded_keywords?: string[] | null;
             include_prereleases?: boolean;
             /** Format: int64 */
+            include_recent_comments_hours?: number;
+            /** Format: int64 */
             interval_minutes?: number;
             keywords?: string[] | null;
             /** @enum {string} */

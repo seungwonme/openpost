@@ -25,6 +25,8 @@ Open **Configure** in the comment trigger to exclude keywords, choose whole-word
 
 Only comments created and first collected after activation start runs. Existing comments, imports of historical comments, edits, and the account’s own replies do not start another run. Reactivating a paused comment workflow starts with future comments again.
 
+To also answer comments written shortly before activation, set **Also include comments from the last N hours** under **Configure**, up to 168 hours. The window counts back from activation and does not move with later checks. Each matching comment in it starts one run. Comments someone already answered by hand or by a campaign, comments taken over in Inbox, people who opted out, and comments older than seven days are skipped. Instagram allows a private reply only within seven days of the comment.
+
 Comment delivery follows the account’s existing collection and webhook setup. A workflow does not make polling-only accounts instant. Instagram comments on media published outside OpenPost arrive through the comments webhook. Until Meta delivers it, OpenPost checks the account's 25 most recent media about every five minutes and reads comments only on media whose comment count changed. Both paths store the comment once in the same Inbox inventory.
 
 ## Review or take over

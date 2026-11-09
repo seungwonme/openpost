@@ -40,6 +40,9 @@ func Validate(def Definition, complete bool) error {
 	return validator.walk(def.Steps, map[string]bool{"source": true}, 0)
 }
 func validateSource(source Source) error {
+	if err := validateCommentBackfill(source); err != nil {
+		return err
+	}
 	switch source.Kind {
 	case "comment_received":
 		return validateCommentSource(source)
