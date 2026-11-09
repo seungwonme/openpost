@@ -98,7 +98,7 @@ OpenPost repeats the checks above before each message and also stops if someone 
 A comment campaign can hold its link until the person follows your account. Start from **Workflows → Templates → Send a link to followers**, or open **Send follow-up messages** after a **Private comment reply** and turn on **Follow check**.
 
 1. Write the private reply so it asks the person to follow and confirm, for example `If you follow us, tap "I followed" below`. Instagram shares whether someone follows you only after they message the account, so a comment alone is not enough.
-2. In the private reply, set **Quick reply button** to the button the person taps, such as `I followed`, up to 20 characters. Tapping it sends that text as their message, which OpenPost reads whether it arrives by webhook or by the regular message check. With a quick reply button, only that exact text counts as the confirmation; other messages are ignored by the check, and opt-out and takeover still apply. Without one, any reply counts.
+2. In the private reply, set **Quick reply button** to the button the person taps, such as `I followed`, up to 20 characters. Tapping it sends that text as their message, which OpenPost reads whether it arrives by webhook or by the regular message check. Any reply counts as the confirmation, so a typed reply also works. Turn on **Count only a tap on the quick reply button** in the follow check to ignore typed replies; opt-out and takeover still apply either way. See [Meta's quick replies documentation](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api/quick-replies).
 3. Write the first follow-up message. It appears above the link button, up to 640 characters.
 4. Enter the **Button title**, up to 20 characters, and the **Button link**, which must start with `https://`. The page behind the link stays public; the check only decides who receives it.
 5. Write the message for people who do not follow yet, for example `Follow us, then reply here again`.
@@ -107,7 +107,7 @@ A comment campaign can hold its link until the person follows your account. Star
 When the person replies, OpenPost reads their follow status from Instagram:
 
 - **Following.** The first follow-up goes out with the link button, and the rest of the sequence continues as usual.
-- **Not following.** They receive your request to follow, with the same quick reply button. When they tap it, or reply when there is no button, within 24 hours of their last reply, OpenPost checks again. After the last check, the run ends without the link and shows why. On that last check, OpenPost sends nothing, because no further check would answer them.
+- **Not following.** They receive your request to follow, with the same quick reply button. When they tap it or reply within 24 hours of their last reply, OpenPost checks again. After the last check, the run ends without the link and shows why. On that last check, OpenPost sends nothing, because no further check would answer them.
 - **Instagram cannot answer.** The run stops and shows the reason, for example missing permission, an account that blocked yours, or a network failure. OpenPost never treats an unanswered check as "not following", and sends neither the link nor the request to follow.
 
 Instagram does not document quick replies on private replies. If Instagram rejects the button, the private reply fails, the run shows why, and OpenPost does not resend it without the button. Remove the **Quick reply button** and ask people to reply with a word instead.

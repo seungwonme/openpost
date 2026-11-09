@@ -25,6 +25,9 @@ type FollowGate struct {
 	ButtonURL        string `json:"button_url"`
 	NotFollowingText string `json:"not_following_text"`
 	MaxChecks        int    `json:"max_checks"`
+	// QuickReplyOnly counts only a tap on the private reply's quick reply as
+	// the reply. Off, any reply counts. Without a quick reply it has no effect.
+	QuickReplyOnly bool `json:"quick_reply_only,omitempty"`
 }
 
 // ParseFollowGate reads an optional follow_gate input. No value means no check.

@@ -63,6 +63,7 @@ export type FollowGate = {
 	button_url: string;
 	not_following_text: string;
 	max_checks: number;
+	quick_reply_only?: boolean;
 };
 
 export const maxFollowChecks = 5;
@@ -73,7 +74,8 @@ const followGateSchema = z.object({
 	button_title: z.string().default(''),
 	button_url: z.string().default(''),
 	not_following_text: z.string().default(''),
-	max_checks: z.number().default(3)
+	max_checks: z.number().default(3),
+	quick_reply_only: z.boolean().optional()
 });
 
 /** A follow check is stored as an object, or as text from a JSON import. No value means off. */

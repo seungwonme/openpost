@@ -233,10 +233,35 @@ func TestFollowGateRejectsLinkTextOverTheTemplateLimit(t *testing.T) {
 	assert.Empty(t, *f.requests)
 }
 
-// Tapping the quick reply posts its title as the person's message. Polling
-// stores it like any other message, so only that text confirms the follow.
-func TestFollowGateWaitsForTheQuickReplyTap(t *testing.T) {
+// Tapping the quick reply posts its title as the person's message, which the
+// polling sync stores like any other message. By default any reply counts.
+func TestFollowGateAcceptsAPolledQuickReplyTapOrATypedReply(t *testing.T) {
 	f := newFollowGateFixture(t)
+	f.in.Comment.QuickReplyTitle = "팔로우했어요"
+	f.setFollowing(false)
+	f.pollText(t, "mid.tap", f.now.Add(-time.Minute), "팔로우했어요")
+	asking := f.advanceSequence(t, f.in)
+	require.Equal(t, AutomationSending, asking.State, "the polled tap starts the check")
+	assert.Equal(t, []string{"reader"}, *f.profiles)
+	require.NoError(t, f.runSendJob(t, asking.Reply.MessageID))
+	assert.Equal(t, []platform.QuickReply{{Title: "팔로우했어요", Payload: platform.FollowCheckQuickReplyPayload}}, (*f.requests)[0].QuickReplies, "the request to follow offers the button again")
+	var attachments []platform.MessageAttachment
+	require.NoError(t, json.Unmarshal([]byte(f.message(t, asking.Reply.MessageID).AttachmentsJSON), &attachments))
+	assert.Equal(t, []platform.MessageAttachment{{Type: "quick_reply", Name: "팔로우했어요"}}, attachments)
+
+	*f.now = f.now.Add(10 * time.Minute)
+	f.setFollowing(true)
+	f.pollText(t, "mid.typed", f.now.Add(-time.Minute), "followed now")
+	link := f.advanceSequence(t, f.in)
+	require.Equal(t, AutomationSending, link.State, "a typed reply still counts")
+	require.NoError(t, f.runSendJob(t, link.Reply.MessageID))
+	assert.Equal(t, []platform.MessageButton{{Title: "Open guide", URL: "https://example.com/guide"}}, (*f.requests)[1].Buttons)
+}
+
+// With quick_reply_only, only the tap confirms the follow.
+func TestFollowGateCanWaitForTheQuickReplyTapOnly(t *testing.T) {
+	f := newFollowGateFixture(t)
+	f.in.Comment.QuickReplyTitle = "팔로우했어요"
 	f.in.Comment.ResponseText = "팔로우했어요"
 	f.setFollowing(false)
 

@@ -76,6 +76,13 @@
 				oninput={(event) => update({ max_checks: Number(event.currentTarget.value) })}
 			/>
 		</div>
+		<label class="flex items-start gap-2 text-sm"
+			><Checkbox
+				checked={gate.quick_reply_only === true}
+				disabled={readonly}
+				onCheckedChange={(checked) => update({ quick_reply_only: checked === true })}
+			/>{m.workflows_follow_gate_quick_reply_only()}</label
+		>
 		<p class="text-xs leading-5 text-muted-foreground">{m.workflows_follow_gate_limits()}</p>
 	{/if}
 </fieldset>

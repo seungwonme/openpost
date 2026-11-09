@@ -30,7 +30,7 @@ func (a workflowActions) messageSequence(ctx context.Context, in workflows.Effec
 		request.FollowGate = &messaging.FollowGate{ButtonTitle: gate.ButtonTitle, ButtonURL: gate.ButtonURL, NotFollowingText: gate.NotFollowingText, MaxChecks: gate.MaxChecks}
 	}
 	if itemID := workflowText(in.Inputs, "engagement_id"); itemID != "" {
-		if request.Comment, err = a.commentSequenceAnchor(ctx, in, itemID, gate != nil); err != nil {
+		if request.Comment, err = a.commentSequenceAnchor(ctx, in, itemID, gate); err != nil {
 			return workflows.EffectResult{}, err
 		}
 	}
@@ -41,7 +41,7 @@ func (a workflowActions) messageSequence(ctx context.Context, in workflows.Effec
 	return sequenceEffect(progress, approve)
 }
 
-func (a workflowActions) commentSequenceAnchor(ctx context.Context, in workflows.EffectRequest, itemID string, followCheck bool) (*messaging.CommentSequenceAnchor, error) {
+func (a workflowActions) commentSequenceAnchor(ctx context.Context, in workflows.EffectRequest, itemID string, gate *workflows.FollowGate) (*messaging.CommentSequenceAnchor, error) {
 	if a.engagement == nil {
 		return nil, errors.New("comment reply automation is unavailable")
 	}
@@ -54,9 +54,13 @@ func (a workflowActions) commentSequenceAnchor(ctx context.Context, in workflows
 		return nil, err
 	}
 	anchor := &messaging.CommentSequenceAnchor{ItemID: reply.ItemID, AccountID: reply.AccountID, AuthorRemoteID: reply.AuthorRemoteID, RepliedAt: reply.SentAt, RespondBy: reply.SentAt.Add(window)}
-	if followCheck {
-		// Only a tap on the private reply's quick reply confirms the follow.
-		anchor.ResponseText = reply.QuickReplyTitle
+	if gate != nil {
+		// Any reply counts by default, so a typed reply still works. A tap on the
+		// quick reply is a reply whose text is its title, on polling and webhooks.
+		anchor.QuickReplyTitle = reply.QuickReplyTitle
+		if gate.QuickReplyOnly {
+			anchor.ResponseText = reply.QuickReplyTitle
+		}
 	}
 	return anchor, nil
 }

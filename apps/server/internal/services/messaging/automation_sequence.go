@@ -46,8 +46,11 @@ type SequenceMessage struct {
 type CommentSequenceAnchor struct {
 	ItemID, AccountID, AuthorRemoteID string
 	RepliedAt, RespondBy              time.Time
+	// QuickReplyTitle is the quick reply the private reply offered. A follow
+	// check offers it again with its request to follow.
+	QuickReplyTitle string
 	// ResponseText, when set, is the only text that counts as the response:
-	// the title of the quick reply the person was asked to tap.
+	// the quick reply title, when the follow check accepts only a tap.
 	ResponseText string
 }
 

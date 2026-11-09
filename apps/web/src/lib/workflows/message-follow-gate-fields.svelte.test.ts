@@ -49,6 +49,14 @@ describe('follow check fields', () => {
 			literal: { ...gate, button_title: 'Open guide' }
 		});
 		await on
+			.getByRole('checkbox', {
+				name: "Count only a tap on the private reply's quick reply button, not typed replies"
+			})
+			.click();
+		expect(oninput).toHaveBeenLastCalledWith('follow_gate', {
+			literal: { ...gate, quick_reply_only: true }
+		});
+		await on
 			.getByRole('checkbox', { name: 'Send the link only to people who follow this account' })
 			.click();
 		expect(oninput).toHaveBeenLastCalledWith('follow_gate', { literal: null });

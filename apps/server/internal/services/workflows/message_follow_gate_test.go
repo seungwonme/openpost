@@ -31,6 +31,7 @@ func TestMessageFollowGateValidation(t *testing.T) {
 		want   string
 	}{
 		{"a comment campaign can gate its link", comment, fromComment(nil), ""},
+		{"a tap-only follow check", comment, fromComment(map[string]any{"quick_reply_only": true}), ""},
 		{"stored as JSON text", comment, []Step{private, sequenceStep(two, map[string]Value{"engagement_id": reference("source.engagement_id"), "follow_gate": literal(`{"button_title":"Open","button_url":"https://example.com","not_following_text":"Follow first"}`)})}, ""},
 		{"off when empty", comment, []Step{private, sequenceStep(two, map[string]Value{"engagement_id": reference("source.engagement_id"), "follow_gate": literal(nil)})}, ""},
 		{"a message trigger has no comment to gate", messageSource(), []Step{sequenceStep(two, map[string]Value{"message_id": reference("source.message_id"), "follow_gate": gate(nil)["follow_gate"]})}, "comment trigger"},

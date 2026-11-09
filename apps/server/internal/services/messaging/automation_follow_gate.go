@@ -231,7 +231,7 @@ func (s *Service) advanceFollowRequest(ctx context.Context, tx bun.Tx, in Sequen
 	request := in.request(trigger.ID, strings.TrimSpace(in.FollowGate.NotFollowingText))
 	// The request to follow offers the same quick reply again, so the person
 	// can confirm by tapping instead of typing.
-	if title := in.Comment.ResponseText; title != "" {
+	if title := in.Comment.QuickReplyTitle; title != "" {
 		request.QuickReplies = []platform.QuickReply{{Title: title, Payload: platform.FollowCheckQuickReplyPayload}}
 	}
 	request.StepID = followCheckStepID(in.StepID, check.Attempt)
