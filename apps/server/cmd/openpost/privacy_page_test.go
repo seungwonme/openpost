@@ -65,6 +65,7 @@ func TestTermsPageAndTikTokVerificationFile(t *testing.T) {
 	verificationFiles := map[string]string{
 		"tiktokkIio8XHwfOvrD5N1h5XwSPi5Vw824ajM.txt": "tiktok-developers-site-verification=kIio8XHwfOvrD5N1h5XwSPi5Vw824ajM",
 		"tiktokGvky3zADrNAANClBnIu3fXarJcPaGoSa.txt": "tiktok-developers-site-verification=Gvky3zADrNAANClBnIu3fXarJcPaGoSa",
+		"tiktok4UuSDPdOEw0kxnPejH0hzTN6zOFnSo3V.txt": "tiktok-developers-site-verification=4UuSDPdOEw0kxnPejH0hzTN6zOFnSo3V",
 	}
 	files := fstest.MapFS{
 		"index.html": {Data: []byte(`<html><head></head><body><div id="app"></div></body></html>`)},
