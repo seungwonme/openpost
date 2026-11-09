@@ -104,7 +104,7 @@ func (s *Service) syncMessages(ctx context.Context, accountID string) (resultErr
 	}
 	return s.states.record(ctx, syncStateUpdate{
 		account: account, status: syncStateOK, cursor: collected.nextCursor,
-		backfillComplete: collected.backfillComplete, cadence: s.collectionCadence(ctx, account, messageCadence(progress.emptyStreak)),
+		backfillComplete: collected.backfillComplete, cadence: s.collectionCadence(ctx, account, s.automationCadence(ctx, account, messageCadence(progress.emptyStreak))),
 		emptyStreak: progress.emptyStreak, attemptedAt: s.now(),
 	})
 }
