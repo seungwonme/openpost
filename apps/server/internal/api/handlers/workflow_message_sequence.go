@@ -21,6 +21,13 @@ func (a workflowActions) messageSequence(ctx context.Context, in workflows.Effec
 	for _, message := range authored {
 		request.Messages = append(request.Messages, messaging.SequenceMessage{Text: message.Text, DelayMinutes: message.DelayMinutes})
 	}
+	gate, err := workflows.ParseFollowGate(in.Inputs["follow_gate"])
+	if err != nil {
+		return workflows.EffectResult{}, err
+	}
+	if gate != nil {
+		request.FollowGate = &messaging.FollowGate{ButtonTitle: gate.ButtonTitle, ButtonURL: gate.ButtonURL, NotFollowingText: gate.NotFollowingText, MaxChecks: gate.MaxChecks}
+	}
 	if itemID := workflowText(in.Inputs, "engagement_id"); itemID != "" {
 		if request.Comment, err = a.commentSequenceAnchor(ctx, in, itemID); err != nil {
 			return workflows.EffectResult{}, err
@@ -48,8 +55,9 @@ func (a workflowActions) commentSequenceAnchor(ctx context.Context, in workflows
 	return &messaging.CommentSequenceAnchor{ItemID: reply.ItemID, AccountID: reply.AccountID, AuthorRemoteID: reply.AuthorRemoteID, RepliedAt: reply.SentAt, RespondBy: reply.SentAt.Add(window)}, nil
 }
 
-// A policy stop or delivery failure ends the run as failed so its reason stays on
-// the run. No response is an ordinary outcome: the run ends, and says why.
+// A policy stop, delivery failure or failed follow check ends the run as failed
+// so its reason stays on the run. No response, and a person who never followed,
+// are ordinary outcomes: the run ends, and says why.
 func sequenceEffect(progress messaging.SequenceProgress, approve bool) (workflows.EffectResult, error) {
 	reply := progress.Reply
 	status := progress.State
@@ -60,7 +68,7 @@ func sequenceEffect(progress messaging.SequenceProgress, approve bool) (workflow
 	switch progress.State {
 	case messaging.SequenceComplete:
 		return workflows.EffectResult{Output: output}, nil
-	case messaging.SequenceNoResponse, messaging.AutomationSkipped:
+	case messaging.SequenceNoResponse, messaging.SequenceNotFollowing, messaging.AutomationSkipped:
 		return workflows.EffectResult{Stop: true, Output: output}, nil
 	case messaging.AutomationAwaitingReview:
 		return workflows.EffectResult{Review: true, Output: output}, nil

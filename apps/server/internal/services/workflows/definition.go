@@ -446,7 +446,7 @@ func isEmptyText(value any) bool {
 }
 
 func jsonInput(kind, field string) bool {
-	return kind == KindFields && field == "fields" || kind == KindHTTP && (field == "headers" || field == "query") || kind == KindCode && field == "data" || slices.Contains([]string{KindFilter, KindSort, KindLimit}, kind) && field == "items" || kind == KindMerge && (field == "first" || field == "second") || kind == KindMessageSequence && field == "messages"
+	return kind == KindFields && field == "fields" || kind == KindHTTP && (field == "headers" || field == "query") || kind == KindCode && field == "data" || slices.Contains([]string{KindFilter, KindSort, KindLimit}, kind) && field == "items" || kind == KindMerge && (field == "first" || field == "second") || kind == KindMessageSequence && (field == "messages" || field == "follow_gate")
 }
 
 func validateCommentSource(source Source) error {

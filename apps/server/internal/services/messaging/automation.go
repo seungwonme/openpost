@@ -90,6 +90,8 @@ type AutomationRequest struct {
 	Authority                                                   workspaceaccess.StoredAuthority
 	WorkflowID, RunID, StepID, TriggerMessageID, Body, Delivery string
 	Approve                                                     bool
+	// Button sends the message as a button template with one link.
+	Button *platform.MessageButton
 }
 
 type automationStop struct {
@@ -297,12 +299,18 @@ func (s *Service) deliverClaimedReply(ctx context.Context, tx bun.Tx, conversati
 		if err != nil {
 			return err
 		}
+		if reason == "" {
+			reason = linkButtonIssue(in.Button, reply.Body)
+		}
 		if reason != "" {
 			reply.State, reply.Reason = AutomationSkipped, reason
 			return s.saveAutomationReply(ctx, tx, reply)
 		}
 		message, err := s.queueMessageWithDB(ctx, tx, conversation.ID, reply.Body)
 		if err != nil {
+			return err
+		}
+		if err := attachLinkButton(ctx, tx, message, in.Button); err != nil {
 			return err
 		}
 		reply.MessageID, reply.State = message.ID, AutomationSending

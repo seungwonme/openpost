@@ -93,4 +93,22 @@ A conversation runs one automated sequence at a time, across all workflows. If s
 
 OpenPost repeats the checks above before each message and also stops if someone takes over the comment. When a check fails, or a message fails or has an unconfirmed outcome, the sequence stops, nothing further is sent, and the run shows the reason. With review delivery, each message waits for its own approval when it is due. If the window closes while a message waits for approval, or 24 hours pass since the response, the approval ends, the run shows why, and the next message from that person can start a sequence.
 
-See [Meta's messaging documentation](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api) for provider requirements. This workflow does not include follower gates, email capture or broadcasts.
+## Send the link only to followers
+
+A comment campaign can hold its link until the person follows your account. Open **Send follow-up messages** after a **Private comment reply** and turn on **Follow check**.
+
+1. Write the private reply so it asks the person to reply, for example `Reply to this message to get the link`. Instagram shares whether someone follows you only after they message the account, so a comment alone is not enough.
+2. Write the first follow-up message. It appears above the link button, up to 640 characters.
+3. Enter the **Button title**, up to 20 characters, and the **Button link**, which must start with `https://`. The page behind the link stays public; the check only decides who receives it.
+4. Write the message for people who do not follow yet, for example `Follow us, then reply here again`.
+5. Choose how many times to check, from 1 to 5. The default is 3.
+
+When the person replies, OpenPost reads their follow status from Instagram:
+
+- **Following.** The first follow-up goes out with the link button, and the rest of the sequence continues as usual.
+- **Not following.** They receive your request to follow. When they reply again within 24 hours of their last reply, OpenPost checks again. After the last check, the run ends without the link and shows why. On that last check, OpenPost sends nothing, because no further check would answer them.
+- **Instagram cannot answer.** The run stops and shows the reason, for example missing permission, an account that blocked yours, or a network failure. OpenPost never treats an unanswered check as "not following", and sends neither the link nor the request to follow.
+
+Each reply is checked once. Replies reach OpenPost through webhooks or through the regular message check, so the follow check works before Meta webhooks are available. A link button opens the page in Instagram's browser and needs no webhook. The request to follow counts toward the limits above like any automated message, and a person taking over the conversation or the comment stops the check.
+
+See [Meta's messaging documentation](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api) for provider requirements. This workflow does not include email capture or broadcasts.

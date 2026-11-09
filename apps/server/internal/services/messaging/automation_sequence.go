@@ -57,6 +57,12 @@ type SequenceRequest struct {
 	Messages                                    []SequenceMessage
 	Delivery, ApprovedBody                      string
 	Approve                                     bool
+	// FollowGate holds the first message, sent with a link button, until the
+	// person follows the account. Comment campaigns only.
+	FollowGate *FollowGate
+	// ResponseMessageID is the response a passed follow check chose. It replaces
+	// the search for the earliest response.
+	ResponseMessageID string
 }
 
 // SequenceProgress is the stored position of a sequence after one advance.
@@ -74,6 +80,13 @@ type SequenceProgress struct {
 // a delay can reach a person after one of those changed. A failure is final: the
 // sequence never skips ahead and never repeats an uncertain delivery.
 func (s *Service) AdvanceMessageSequence(ctx context.Context, in SequenceRequest) (SequenceProgress, error) {
+	if in.FollowGate != nil {
+		gated, passed, response, err := s.advanceFollowGate(ctx, in)
+		if err != nil || !passed {
+			return gated, err
+		}
+		in.ResponseMessageID = response
+	}
 	var progress SequenceProgress
 	err := s.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if err := organizationguard.LockWorkspace(ctx, tx, in.Authority.WorkspaceID); err != nil {
@@ -199,6 +212,10 @@ func (s *Service) findSequenceResponse(ctx context.Context, tx bun.Tx, in Sequen
 		return SequenceProgress{State: SequenceStopped, Reason: reason}, models.DirectMessage{}, nil
 	}
 	var response models.DirectMessage
+	if in.ResponseMessageID != "" {
+		err = tx.NewSelect().Model(&response).Where("id = ? AND workspace_id = ?", in.ResponseMessageID, in.Authority.WorkspaceID).Scan(ctx)
+		return SequenceProgress{}, response, err
+	}
 	err = tx.NewSelect().Model(&response).
 		Join("JOIN conversations AS c ON c.id = direct_message.conversation_id").
 		Where("direct_message.workspace_id = ? AND direct_message.direction = 'inbound' AND direct_message.deleted_at IS NULL", in.Authority.WorkspaceID).
@@ -214,7 +231,7 @@ func (s *Service) findSequenceResponse(ctx context.Context, tx bun.Tx, in Sequen
 	if !s.now().Before(anchor.RespondBy) {
 		return SequenceProgress{State: SequenceNoResponse, Reason: stopReasonNoResponse}, response, nil
 	}
-	if _, err := tx.NewRaw(`INSERT INTO message_sequence_waits(run_id,workspace_id,item_id,account_id,author_remote_id,replied_at,respond_by) VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, in.RunID, in.Authority.WorkspaceID, anchor.ItemID, anchor.AccountID, anchor.AuthorRemoteID, anchor.RepliedAt, anchor.RespondBy).Exec(ctx); err != nil {
+	if _, err := tx.NewRaw(`INSERT INTO message_sequence_waits(run_id,workspace_id,item_id,account_id,author_remote_id,replied_at,respond_by) VALUES(?,?,?,?,?,?,?) ON CONFLICT (run_id) DO UPDATE SET replied_at = excluded.replied_at, respond_by = excluded.respond_by`, in.RunID, in.Authority.WorkspaceID, anchor.ItemID, anchor.AccountID, anchor.AuthorRemoteID, anchor.RepliedAt, anchor.RespondBy).Exec(ctx); err != nil {
 		return SequenceProgress{}, response, err
 	}
 	return SequenceProgress{State: SequenceWaitingResponse, WakeAt: anchor.RespondBy}, response, nil
@@ -291,7 +308,11 @@ func (s *Service) advanceSequenceRow(ctx context.Context, tx bun.Tx, trigger mod
 	if body == "" {
 		body = reply.Body
 	}
-	if err := s.advanceClaimedReply(ctx, tx, trigger, conversation, in.request(trigger.ID, body), &reply); err != nil {
+	request := in.request(trigger.ID, body)
+	if reply.SequencePosition == 0 && in.FollowGate != nil {
+		request.Button = in.FollowGate.button()
+	}
+	if err := s.advanceClaimedReply(ctx, tx, trigger, conversation, request, &reply); err != nil {
 		return SequenceProgress{}, err
 	}
 	progress := SequenceProgress{State: reply.State, Reason: reply.Reason, Reply: reply, Sent: reply.SequencePosition}
