@@ -47,3 +47,19 @@ heartbeats update only the liveness timestamp. Provider fences and local review
 commits compare the acquisition generation, including when retry counters reset.
 Both fresh chains and upgrades are covered by migration tests; PostgreSQL tests
 use `OPENPOST_TEST_POSTGRES_URL` with an isolated schema.
+
+## Instagram comments on native media (fork)
+
+Instagram accounts also have a `comments` account feed for media published
+outside OpenPost, until Meta delivers comment webhooks. One request lists the 25
+most recent media with `comments_count`; comments are read only for media whose
+count differs from the last count read, at most ten media per job. The feed
+cursor stores those per-media counts, so a generation reset reads them again.
+Media of published Renditions stay with owned-post collection, and media older
+than 90 days are skipped. Comments are stored through the webhook persistence
+path, with the media as conversation and subject, so a later webhook finds the
+same item. Comments written before the feed started are stored without
+notifications. The feed needs `instagram_basic` (or `instagram_business_basic`)
+in addition to the comment scopes. Migration 9005 rebuilds
+`engagement_account_sync_states` to allow the feed. Deleted comments are not
+detected; missing items never imply deletion.

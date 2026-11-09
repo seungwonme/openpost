@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/openpost/backend/internal/inboxactivity"
 	"github.com/openpost/backend/internal/models"
 	"github.com/openpost/backend/internal/platform"
 	"github.com/openpost/backend/internal/services/inboxchanges"
@@ -101,25 +100,6 @@ func (s *Service) persistWebhookComment(ctx context.Context, account models.Soci
 		if current.Account.OAuthGrantID != authority.Account.OAuthGrantID || !current.GrantConsentedAt.Equal(authority.GrantConsentedAt) || !current.FeatureDecidedAt.Equal(authority.FeatureDecidedAt) || current.Account.GrantedScopes != authority.Account.GrantedScopes {
 			return errActivityChanged
 		}
-		item, isNew, err := persistEngagementComment(ctx, tx, models.Rendition{}, account, comment, s.now())
-		if err != nil {
-			return err
-		}
-		if item.ID == "" {
-			return nil
-		}
-		subject := inboxactivity.EngagementSubject{Kind: "comment", RemoteID: postID, URL: safeExternalURL(permalink)}
-		raw, err := json.Marshal(subject)
-		if err != nil {
-			return err
-		}
-		item.SubjectJSON = string(raw)
-		if err := saveEngagementItem(ctx, tx, item); err != nil {
-			return err
-		}
-		if isNew && s.notifications != nil {
-			return s.notifyAccountActivity(ctx, tx, account, item)
-		}
-		return nil
+		return s.persistExternalInstagramComment(ctx, tx, account, comment, permalink, postID, true)
 	})
 }
