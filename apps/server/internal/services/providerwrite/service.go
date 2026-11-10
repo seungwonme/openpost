@@ -291,7 +291,14 @@ func (s *Service) resume(ctx context.Context, attempt *models.ProviderWriteAttem
 		if resumeErr == nil {
 			resumeErr = errors.New("provider rejected the resumed write")
 		}
-		if err := s.persistDefiniteFailure(ctx, current, platform.PublishSubmissionRejected, platform.PublishRetryNever, resumeErr); err != nil {
+		// A resumed write the adapter declares retry-safe (a rejected
+		// container creation that exposed nothing) stays retryable by the
+		// operator. Every other rejection keeps the never-retry default.
+		retrySafety := platform.PublishRetryNever
+		if result.RetrySafety == platform.PublishRetrySafe {
+			retrySafety = platform.PublishRetrySafe
+		}
+		if err := s.persistDefiniteFailure(ctx, current, platform.PublishSubmissionRejected, retrySafety, resumeErr); err != nil {
 			return platform.PublishResult{}, err
 		}
 		return platform.PublishResult{}, resumeErr

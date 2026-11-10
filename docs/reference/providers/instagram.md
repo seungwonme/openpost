@@ -55,7 +55,7 @@ If `redirect_uri` is omitted, OpenPost derives it from `OPENPOST_APP_URL`.
 - Publishes a single image URL with a caption.
 - Publishes a single video URL as a Reel.
 - Lets you choose a Reel cover frame or upload a separate cover image from destination settings.
-- Publishes 2-10 media items as a carousel when multiple compatible media items are attached.
+- Publishes 2-10 media items as a carousel when multiple compatible media items are attached. Photos and videos can be mixed; each video item is sent as a `VIDEO` carousel item, and Reels cannot be carousel items.
 - Publishes Stories and lists, replies to, hides, and deletes eligible comments when Comments and replies is enabled for that account.
 - Supports inbox collection for Direct messages when enabled and replies within Meta's reply window. Direct messages and Comments and replies are separate per-account choices that start off.
 - Grow is not available for Instagram.

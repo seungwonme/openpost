@@ -425,7 +425,11 @@ func (i *InstagramAdapter) createMediaContainer(ctx context.Context, accessToken
 	}
 	if video {
 		values["video_url"] = mediaURL
-		if instagramIsStory(req) {
+		if carouselItem {
+			// Meta rejects a video container without media_type. Reels cannot
+			// appear in carousels, so a carousel child is always a plain VIDEO.
+			values["media_type"] = "VIDEO"
+		} else if instagramIsStory(req) {
 			values["media_type"] = "STORIES"
 		} else if instagramIsReel(req) {
 			values["media_type"] = "REELS"
@@ -535,27 +539,30 @@ func (i *InstagramAdapter) publishCarousel(ctx context.Context, accessToken, ins
 	}
 	childIDs := make([]string, 0, len(req.PlatformMediaIDs))
 	for index, mediaURL := range req.PlatformMediaIDs {
-		if err := req.Checkpoint(pendingInstagramCarouselCreateResult(childIDs)); err != nil {
+		pending := pendingInstagramCarouselCreateResult(childIDs)
+		if err := req.Checkpoint(pending); err != nil {
 			return "", err
 		}
 		childID, err := i.createMediaContainer(ctx, accessToken, instagramUserID, "", mediaURL, isVideoMime(req.Media[index].MimeType), true, req, mediaSettingsAt(req, index), mediaAltTextAt(req, index))
 		if err != nil {
-			return "", err
+			return "", instagramStageFailure(pending, err)
 		}
 		childIDs = append(childIDs, childID)
-		if err := req.Checkpoint(pendingInstagramCarouselResult(childIDs)); err != nil {
+		pending = pendingInstagramCarouselResult(childIDs)
+		if err := req.Checkpoint(pending); err != nil {
 			return "", err
 		}
 		if err := i.waitForContainer(ctx, accessToken, childID); err != nil {
-			return "", err
+			return "", instagramStageFailure(pending, err)
 		}
 	}
-	if err := req.Checkpoint(pendingInstagramCarouselParentResult(childIDs)); err != nil {
+	pending := pendingInstagramCarouselParentResult(childIDs)
+	if err := req.Checkpoint(pending); err != nil {
 		return "", err
 	}
 	containerID, err := i.createCarouselContainer(ctx, accessToken, instagramUserID, req, childIDs)
 	if err != nil {
-		return "", err
+		return "", instagramStageFailure(pending, err)
 	}
 	if err := checkpointInstagramFinalContainer(req, containerID); err != nil {
 		return "", err
@@ -612,6 +619,14 @@ func instagramStoryFailure(pending PublishResult, err error) error {
 			pending = pendingInstagramStoryPublishResult(checkpoint.currentIndex, checkpoint.references, checkpoint.containerID)
 		}
 	}
+	return instagramStageFailure(pending, err)
+}
+
+// instagramStageFailure classifies a failure inside a checkpointed publish
+// stage. The pending checkpoint written before the provider call otherwise
+// backfills the empty result and holds a definite 4xx rejection as pending
+// forever; the outcome carries the rejected state out of the write function.
+func instagramStageFailure(pending PublishResult, err error) error {
 	result, normalized := instagramPendingOrRejected(pending, err)
 	return &instagramPublishOutcome{result: result, err: normalized}
 }
@@ -1244,9 +1259,9 @@ func (i *InstagramAdapter) resumeCarousel(ctx context.Context, accessToken, inst
 			return pending, nil
 		}
 	}
-	if checkpoint.kind == instagramCheckpointChildPostKind || checkpoint.kind == instagramCheckpointParentPostKind {
-		return pending, nil
-	}
+	// A create checkpoint means the create request may not have reached Meta.
+	// Creating the container again is safe: an unpublished container never
+	// reaches the account, and only the returned id enters the carousel.
 	if len(checkpoint.references) < len(req.PlatformMediaIDs) {
 		index := len(checkpoint.references)
 		if err := req.Checkpoint(pendingInstagramCarouselCreateResult(checkpoint.references)); err != nil {
@@ -1255,7 +1270,7 @@ func (i *InstagramAdapter) resumeCarousel(ctx context.Context, accessToken, inst
 		pending = pendingInstagramCarouselCreateResult(checkpoint.references)
 		childID, err := i.createMediaContainer(ctx, accessToken, instagramUserID, "", req.PlatformMediaIDs[index], isVideoMime(req.Media[index].MimeType), true, req, mediaSettingsAt(req, index), mediaAltTextAt(req, index))
 		if err != nil {
-			return instagramPendingOrRejected(pending, err)
+			return instagramCreateRejectedOrPending(pending, err)
 		}
 		return pendingInstagramCarouselResult(append(append([]string(nil), checkpoint.references...), childID)), nil
 	}
@@ -1265,7 +1280,7 @@ func (i *InstagramAdapter) resumeCarousel(ctx context.Context, accessToken, inst
 	pending = pendingInstagramCarouselParentResult(checkpoint.references)
 	containerID, err := i.createCarouselContainer(ctx, accessToken, instagramUserID, req, checkpoint.references)
 	if err != nil {
-		return instagramPendingOrRejected(pending, err)
+		return instagramCreateRejectedOrPending(pending, err)
 	}
 	return pendingInstagramFinalResult(containerID), nil
 }
@@ -1400,6 +1415,8 @@ func instagramPendingOrRejected(pending PublishResult, err error) (PublishResult
 				pending = pendingInstagramStoryResult(checkpoint.currentIndex, checkpoint.references, checkpoint.containerID)
 			case instagramCheckpointStoryKind, instagramCheckpointStoryMakeKind:
 				pending = pendingInstagramStoryCheckpoint(checkpoint)
+			case instagramCheckpointCarouselKind, instagramCheckpointChildPostKind, instagramCheckpointParentPostKind:
+				pending = pendingInstagramCarouselCheckpoint(checkpoint)
 			default:
 				pending = pendingInstagramFinalResult(checkpoint.containerID)
 			}
@@ -1412,6 +1429,17 @@ func instagramPendingOrRejected(pending PublishResult, err error) (PublishResult
 		pending.RetrySafety = PublishRetryNever
 	}
 	return pending, err
+}
+
+// instagramCreateRejectedOrPending classifies a failed container creation
+// replayed from a checkpoint. A rejected creation made nothing visible on the
+// account, so the operator may safely retry the destination.
+func instagramCreateRejectedOrPending(pending PublishResult, err error) (PublishResult, error) {
+	result, normalized := instagramPendingOrRejected(pending, err)
+	if result.SubmissionState == PublishSubmissionRejected {
+		result.RetrySafety = PublishRetrySafe
+	}
+	return result, normalized
 }
 
 func rejectedInstagramCheckpoint(pending PublishResult, message string) (PublishResult, error) {
