@@ -143,6 +143,7 @@ func (s *Service) evaluateFeedStep(ctx context.Context, mode string, progress st
 func (s *Service) evaluateNativeStep(ctx context.Context, record runRecord, authority workspaceaccess.StoredAuthority, step Step, progress stepProgress, remaining []Step) (stepProgress, error) {
 	if record.Mode == ModePreview {
 		progress.result.Output = previewOutput(step, progress.result.Inputs)
+		s.warnConnectedCommenter(ctx, record, step, progress.result.Output, progress.result.Inputs)
 		return progress, nil
 	}
 	effect, err := s.executeEffect(ctx, record, authority, step, progress.result.Inputs)

@@ -35,7 +35,10 @@ const githubReleasesPerPage = 10
 var sourceURLPolicy = netguard.URLPolicy{Label: "workflow source", AllowedSchemes: []string{"https", "http"}}
 
 type WorkflowSourceItem struct {
-	Excluded      bool    `json:"-"`
+	Excluded bool `json:"-"`
+	// SkipReason ends the item's run at admission with this reason instead of
+	// starting it, so run history shows why nothing was sent.
+	SkipReason    string  `json:"-"`
 	EngagementID  string  `json:"engagement_id,omitempty"`
 	Platform      string  `json:"platform,omitempty"`
 	AuthorName    string  `json:"author_name,omitempty"`

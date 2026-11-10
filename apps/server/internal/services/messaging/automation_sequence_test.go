@@ -9,6 +9,7 @@ import (
 	"github.com/openpost/backend/internal/models"
 	"github.com/openpost/backend/internal/platform"
 	"github.com/openpost/backend/internal/services/providerwrite"
+	"github.com/openpost/backend/internal/services/workflows"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -449,6 +450,37 @@ func TestCommentTakeoverStopsAQueuedFollowUpInTheSendFence(t *testing.T) {
 	stopped := f.advanceSequence(t, in)
 	assert.Equal(t, SequenceStopped, stopped.State)
 	assert.Equal(t, stopReasonComment, stopped.Reason)
+}
+
+func (f automationFixture) connectSibling(t *testing.T, remoteID string) {
+	t.Helper()
+	_, err := f.db.NewInsert().Model(&models.SocialAccount{ID: "sibling", WorkspaceID: "workspace", Platform: "instagram", AccountID: remoteID, Slug: "sibling", AccessTokenEnc: []byte("token"), IsActive: true}).Exec(t.Context())
+	require.NoError(t, err)
+}
+
+func TestCommentFollowUpStopsForCommenterConnectedToTheWorkspace(t *testing.T) {
+	t.Run("before any response", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		in := f.commentSequenceRequest(t)
+		f.connectSibling(t, "reader")
+		stopped := f.advanceSequence(t, in)
+		assert.Equal(t, SequenceStopped, stopped.State)
+		assert.Contains(t, stopped.Reason, workflows.ConnectedAccountSkipPrefix)
+		assert.Zero(t, *f.sends)
+	})
+	t.Run("in the send fence of a queued follow-up", func(t *testing.T) {
+		f := newAutomationFixture(t)
+		in := f.commentSequenceRequest(t)
+		f.receive(t, "response", f.now.Add(-time.Minute))
+		first := f.advanceSequence(t, in)
+		require.Equal(t, AutomationSending, first.State)
+		f.connectSibling(t, "reader")
+		require.NoError(t, f.runSendJob(t, first.Reply.MessageID))
+		assert.Zero(t, *f.sends, "nothing reached the provider")
+		stopped := f.advanceSequence(t, in)
+		assert.Equal(t, SequenceStopped, stopped.State)
+		assert.Contains(t, stopped.Reason, workflows.ConnectedAccountSkipPrefix)
+	})
 }
 
 // One person sends six short messages to a five message sequence. The first runs
