@@ -49,13 +49,26 @@ func (s *Service) commentItems(ctx context.Context, workspaceID string, source S
 	if err := query.Scan(ctx); err != nil {
 		return nil, err
 	}
+	var connected ConnectedAccounts
+	if record != nil && len(rows) > 0 {
+		// Only admission records a skipped comment; a sample shows the inventory as is.
+		loaded, err := LoadConnectedAccounts(ctx, s.db, workspaceID)
+		if err != nil {
+			return nil, err
+		}
+		connected = loaded
+	}
 	items := make([]SourceItem, 0, len(rows))
 	for _, row := range rows {
 		excluded := !commentKeywordMatches(row.Body, source.Keywords, source.MatchMode) || (len(source.ExcludedKeywords) > 0 && commentKeywordMatches(row.Body, source.ExcludedKeywords, source.MatchMode))
 		if excluded && record == nil {
 			continue
 		}
-		items = append(items, SourceItem{Excluded: excluded, ID: row.ID, EngagementID: row.ID, AccountID: row.SocialAccountID, RenditionID: row.RenditionID, Body: row.Body, Title: row.AuthorName, AuthorName: row.AuthorName, Platform: row.Platform, CreatedAt: row.RemoteCreatedAt.UTC().Format(time.RFC3339)})
+		skip := ""
+		if match, found := connected.Match(row.Platform, row.AuthorRemoteID, row.AuthorHandle, row.AuthorName); found && !excluded {
+			skip = match.Reason()
+		}
+		items = append(items, SourceItem{Excluded: excluded, SkipReason: skip, ID: row.ID, EngagementID: row.ID, AccountID: row.SocialAccountID, RenditionID: row.RenditionID, Body: row.Body, Title: row.AuthorName, AuthorName: row.AuthorName, Platform: row.Platform, CreatedAt: row.RemoteCreatedAt.UTC().Format(time.RFC3339)})
 	}
 	if record != nil {
 		slices.Reverse(items)

@@ -321,3 +321,57 @@ func TestRunPrivateReplyIsOnlyADeliveredReplyFromThisRun(t *testing.T) {
 	_, err = s.RunPrivateReply(t.Context(), in.Authority, "other-run", "c")
 	require.ErrorIs(t, err, ErrNoDeliveredPrivateReply)
 }
+
+func connectSiblingAccount(t *testing.T, s *Service, remoteID, username string) {
+	t.Helper()
+	_, err := s.db.NewInsert().Model(&models.SocialAccount{ID: "sibling", WorkspaceID: "w", Platform: "instagram", AccountID: remoteID, AccountUsername: username, Slug: "sibling", AccessTokenEnc: []byte("token"), IsActive: true}).Exec(t.Context())
+	require.NoError(t, err)
+}
+
+func TestCommentCampaignWriteFenceStopsAccountConnectedAfterAdmission(t *testing.T) {
+	s, in, p := campaignTest(t)
+	reply, err := s.AdvanceAutomationReply(t.Context(), in)
+	require.NoError(t, err)
+	require.Equal(t, "sending", reply.State, "the commenter was a stranger when the reply was admitted")
+
+	connectSiblingAccount(t, s, "reader", "reader_account")
+
+	var job models.Job
+	require.NoError(t, s.db.NewSelect().Model(&job).Where("id=?", reply.JobID).Scan(t.Context()))
+	var input engagementActionJob
+	require.NoError(t, json.Unmarshal([]byte(job.Payload), &input))
+	err = s.performEngagementAction(t.Context(), input)
+	// Only the connected-account check produces this reason, so it proves the
+	// check ran inside the fence rather than the send failing for another reason.
+	require.ErrorContains(t, err, workflows.ConnectedAccountSkipPrefix)
+	require.ErrorContains(t, err, "Matched by account ID")
+	require.Zero(t, p.private, "no private reply reached the provider")
+	require.Zero(t, p.public, "no public reply reached the provider")
+}
+
+func TestCommentCampaignRejectsConnectedCommenterBeforeClaiming(t *testing.T) {
+	s, in, p := campaignTest(t)
+	connectSiblingAccount(t, s, "other-remote", "Reader_Handle")
+	_, err := s.db.NewUpdate().Model((*models.EngagementItem)(nil)).Set("author_handle='@reader_handle'").Where("id='c'").Exec(t.Context())
+	require.NoError(t, err)
+	_, err = s.AdvanceAutomationReply(t.Context(), in)
+	require.ErrorContains(t, err, "Possible match by username @reader_handle")
+	require.Zero(t, p.private)
+	jobs, err := s.db.NewSelect().Model((*models.Job)(nil)).Count(t.Context())
+	require.NoError(t, err)
+	require.Zero(t, jobs, "nothing was queued")
+}
+
+func TestInboxSummaryLabelsCommentSkippedForConnectedAccount(t *testing.T) {
+	s, _, _ := campaignTest(t)
+	now := time.Now().UTC()
+	source := `{"engagement_id":"c","id":"c"}`
+	_, err := s.db.NewRaw(`INSERT INTO workflow_runs(id,workflow_id,workspace_id,workflow_name,workflow_revision,mode,state,error,definition_json,authority_json,source_json,remaining_json,created_at,updated_at) VALUES('skipped','wf','w','Playbook',1,'live','cancelled',?,'{}','{}',?,'[]',?,?)`, workflows.ConnectedAccountSkipPrefix+" Matched by account ID.", source, now, now).Exec(t.Context())
+	require.NoError(t, err)
+	var item models.EngagementItem
+	require.NoError(t, s.db.NewSelect().Model(&item).Where("id='c'").Scan(t.Context()))
+	summaries, err := s.loadAutomationSummaries(t.Context(), []models.EngagementItem{item})
+	require.NoError(t, err)
+	require.Equal(t, AutomationStateConnectedAccount, summaries["c"].State)
+	require.Equal(t, "skipped", summaries["c"].RunID)
+}

@@ -10312,6 +10312,7 @@
 	"workflows_comment_sending": "Sending reply",
 	"workflows_comment_failed": "Reply failed. Inspect delivery before retrying.",
 	"workflows_comment_skipped": "Skipped: this comment was already handled",
+	"workflows_comment_connected_account": "Skipped: connected account",
 	"workflows_comment_open_run": "Inspect workflow run",
 	"workflows_comment_empty_accounts": "Connect an account with Comments enabled to set up replies.",
 	"workflows_comment_stop_all": "Stop automatic replies",

@@ -302,6 +302,10 @@ func commentDailyLimitReached(ctx context.Context, db bun.IDB, record workflowRe
 	if def.Source.Kind == "message_received" {
 		query = countMessageRuns(query, def)
 	}
+	if def.Source.Kind == "comment_received" {
+		// A comment from a connected account sent nothing, so it spends no limit.
+		query = query.Where("error NOT LIKE ?", ConnectedAccountSkipPrefix+"%")
+	}
 	count, err := query.Count(ctx)
 	return count >= def.Source.DailyLimit, err
 }
@@ -331,6 +335,9 @@ func (s *Service) admitSourceEvent(ctx context.Context, tx bun.Tx, record workfl
 		}
 		if !winner {
 			return false, nil
+		}
+		if item.SkipReason != "" {
+			return false, s.recordSkippedRun(ctx, tx, record, def, authority, item, item.SkipReason, now)
 		}
 	}
 	if def.Source.Kind == "message_received" {

@@ -292,3 +292,30 @@ func TestUnansweredWaitKeepsItsJobSchedule(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(after.Payload), &payload))
 	assert.Equal(t, h.runID, payload["run_id"])
 }
+
+// A commenter who is an account connected to the workspace after the private
+// reply was sent never receives the link: the response is matched to the wrong
+// account's conversation, so the follow check and the button stay unsent.
+func TestFollowGateRunWithConnectedCommenterNeverSendsTheLink(t *testing.T) {
+	h := newFollowWakeHarness(t, true)
+	_, err := h.db.NewInsert().Model(&models.SocialAccount{ID: "sibling", WorkspaceID: "ws", Platform: "instagram", AccountID: "reader", AccountUsername: "reader_account", Slug: "sibling", AccessTokenEnc: []byte("token"), IsActive: true, CreatedAt: time.Now().UTC()}).Exec(t.Context())
+	require.NoError(t, err)
+	h.reply(t, "mid.tap", "팔로우했어요")
+
+	h.sweep(t)
+	h.drain(t)
+
+	assert.Empty(t, *h.sent, "no message and no link button was sent")
+	assert.Empty(t, *h.profiles, "the follow check never read the profile")
+	run := h.run(t)
+	assert.NotEqual(t, workflows.StateSucceeded, run.State)
+	assert.Contains(t, run.Error+stepErrors(run), workflows.ConnectedAccountSkipPrefix)
+}
+
+func stepErrors(run workflows.Run) string {
+	text := ""
+	for _, step := range run.Steps {
+		text += step.Error
+	}
+	return text
+}
