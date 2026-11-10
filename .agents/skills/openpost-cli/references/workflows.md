@@ -344,3 +344,16 @@ openpost publication delete-comment comment-id --json
 ```
 
 Use only actions marked supported in the comment data. Replies and moderation change the provider's remote state.
+
+## Manage workflows
+
+```sh
+openpost workflow list --json
+openpost workflow get workflow-id --json > workflow.json
+openpost workflow save workflow-id --file workflow.json --json
+openpost workflow create --file definition.json --name 'Comment to DM' --json
+openpost workflow runs workflow-id --json
+openpost workflow run run-id --json
+```
+
+`save` sends the revision the edit started from (the `revision` in a `get --json` file, or `--expected-revision`). A revision conflict is an error; reread the workflow and decide again instead of retrying. `publish`, `stop-replies`, `delete`, `run approve` and `run cancel` change live behavior and ask for confirmation unless `--yes` is already authorized. `publish` enables automatic runs and replies. `run approve` needs `--post-revision` for a post review. `run` and `runs` print the recorded stop reason unchanged.

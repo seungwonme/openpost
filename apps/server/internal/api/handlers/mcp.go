@@ -41,6 +41,7 @@ import (
 	"github.com/openpost/backend/internal/services/publicurl"
 	"github.com/openpost/backend/internal/services/sessions"
 	"github.com/openpost/backend/internal/services/usage"
+	"github.com/openpost/backend/internal/services/workflows"
 	"github.com/uptrace/bun"
 )
 
@@ -291,6 +292,7 @@ type MCPHandler struct {
 	serverVersion     string
 	featureGate       engagementservice.FeatureGate
 	engagement        *engagementservice.Service
+	workflows         *workflows.Service
 	toolMode          mcpToolMode
 }
 
@@ -1394,7 +1396,7 @@ type mcpOperationDefinition struct {
 }
 
 func mcpOperationCatalog() []mcpOperationDefinition {
-	return append(mcpInboxTools(), []mcpOperationDefinition{
+	return append(append(mcpInboxTools(), mcpWorkflowTools()...), []mcpOperationDefinition{
 		mcpListWorkspacesTool(),
 		mcpListProviderCatalogTool(),
 		mcpListAccountsTool(),
@@ -2657,11 +2659,17 @@ func mcpToolInvocationStatus(toolName string) mcpToolStatus {
 	if status, ok := mcpToolStatuses[toolName]; ok {
 		return status
 	}
+	if status, ok := mcpWorkflowToolStatuses[toolName]; ok {
+		return status
+	}
 	return mcpToolStatus{Invoking: "Running tool", Invoked: "Tool complete"}
 }
 
 //nolint:gocyclo // Tool cases are a flat schema catalog, not nested control flow.
 func mcpToolOutputSchema(toolName string) map[string]any {
+	if schema, ok := mcpWorkflowOutputSchema(toolName); ok {
+		return schema
+	}
 	if strings.HasPrefix(toolName, "editor_") || strings.HasPrefix(toolName, "library_") || strings.HasPrefix(toolName, "style_") || strings.HasPrefix(toolName, "preferences_") || toolName == "timeline_inspect" || toolName == "image_inspect" || toolName == "media_library" || toolName == "media_analyze" || toolName == "media_analysis_status" || toolName == "media_analysis_cancel" || toolName == "media_search" || toolName == "media_inspect" || toolName == "media_frame" || toolName == "media_storyboard" || strings.HasPrefix(toolName, "scene_") || toolName == "preview_render" || toolName == "preview_audio" || toolName == "video_edit" || toolName == "image_edit" || toolName == "export_start" || toolName == "export_status" || toolName == "export_cancel" {
 		return mcpOpenObjectSchema()
 	}
@@ -3343,6 +3351,8 @@ func (h *MCPHandler) callDiscoveredMCPOperation(ctx context.Context, userID stri
 func (h *MCPHandler) callMCPOperation(ctx context.Context, userID, operation string, args map[string]any) (any, *mcpError) {
 	operation = normalizeMCPOperationName(operation)
 	switch operation {
+	case mcpToolWorkflowList, mcpToolWorkflowGet, mcpToolWorkflowRuns, mcpToolWorkflowRun, mcpToolWorkflowCreate, mcpToolWorkflowSave, mcpToolWorkflowPublish, mcpToolWorkflowPause, mcpToolWorkflowStop, mcpToolWorkflowDelete, mcpToolWorkflowRunApprove, mcpToolWorkflowRunCancel:
+		return h.callWorkflowTool(ctx, userID, operation, args)
 	case mcpToolInboxList, mcpToolInboxGet, mcpToolInboxRefresh, mcpToolInboxState, mcpToolInboxRead, mcpToolInboxAction:
 		return h.callInboxTool(ctx, userID, operation, args)
 	case mcpToolWorkspaces, mcpToolProviders, mcpToolSearchDocs:

@@ -181,3 +181,36 @@ func TestProxyServeSkipsAcceptedNotificationResponse(t *testing.T) {
 		t.Fatalf("expected no stdio response for notification, got %q", out.String())
 	}
 }
+
+func TestProxyForwardsWorkflowWriteToolCallUnchanged(t *testing.T) {
+	t.Parallel()
+
+	const request = `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"save_workflow","arguments":{"workspace_id":"ws-1","workflow_id":"wf-1","name":"Launch","expected_revision":4,"definition":{"schema":1,"source":{"kind":"manual"},"steps":[]}}}}`
+	const response = `{"jsonrpc":"2.0","id":7,"error":{"code":-32602,"message":"workflow changed; reload before saving"}}`
+	var received string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+		}
+		received = r.Method + " " + r.URL.Path + " " + string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(response))
+	}))
+	defer srv.Close()
+
+	var in bytes.Buffer
+	if err := writeFrame(&in, []byte(request), frameFormatNewline); err != nil {
+		t.Fatalf("writeFrame: %v", err)
+	}
+	var out bytes.Buffer
+	if err := NewProxyWithVersion(srv.URL, "token", defaultVersion).Serve(context.Background(), &in, &out); err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+	if want := "POST /mcp " + request; received != want {
+		t.Fatalf("server received %q, want %q", received, want)
+	}
+	if got := strings.TrimSpace(out.String()); got != response {
+		t.Fatalf("client received %q, want the server's conflict error %q", got, response)
+	}
+}

@@ -85,3 +85,9 @@ Use `list_inbox` with `workspace_id` and `kind: "mention"` or `kind: "review"`. 
 With `mcp:full`, `refresh_inbox` queues collection, `set_inbox_state` changes shared read/archive state, and `mark_inbox_read` marks all matching unread items across every page. `act_on_inbox_item` queues only supported actions. Supply a stable `client_operation_id` for that exact intent.
 
 A Google review reply replaces the location owner's one reply. `delete_reply` removes only that reply. Never infer delivery from admission, or approval from delivery. Inspect the job and Google moderation state before another replacement. See the [Inbox guide](/guides/inbox) for account permissions and recovery.
+
+## Manage workflows
+
+Use `list_workflows` and `get_workflow` to read a workflow's definition, revision, published revision, and enabled state. Use `list_workflow_runs` for the latest runs with their stop reasons, then `get_workflow_run` for step inputs, outputs, and errors. These tools read stored state and work with `mcp:read`.
+
+With `mcp:full`, `create_workflow` saves a disabled draft and `save_workflow` replaces a draft. `save_workflow`, `publish_workflow`, `pause_workflow`, and `stop_workflow_replies` take the `expected_revision` you read; a changed workflow fails with a conflict and nothing is overwritten. `publish_workflow` enables the source, so matching activity can start runs and send replies. `delete_workflow` removes a paused workflow with no active runs and its run history. `approve_workflow_run` binds an approval to the reviewed `publication_revision`, and `cancel_workflow_run` stops the remaining steps. The terminal equivalents are in [Manage workflows](/automate/cli/workflows).

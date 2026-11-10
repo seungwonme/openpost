@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"reflect"
+	"strings"
 )
 
 func TestInboxCommandsPreserveFiltersReceiptsAndNativeContext(t *testing.T) {
@@ -76,4 +77,39 @@ func TestInboxCommandsPreserveFiltersReceiptsAndNativeContext(t *testing.T) {
 		}
 	}
 	equal([]string{"GET /api/v1/engagement", "POST /api/v1/engagement/read", "POST /api/v1/engagement/review/actions", "POST /api/v1/engagement/state"}, calls)
+}
+
+func TestInboxListPrintsATableUnlessJSONIsRequested(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/workspaces" {
+			_, _ = w.Write([]byte(`[{"id":"w","name":"Production"}]`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"items":[{"id":"item-1","kind":"comment","platform":"instagram","author_name":"Mina","body":"LINK please","last_seen_at":"2026-11-10T09:00:00Z","remote_created_at":"2026-11-10T08:59:00Z"},{"id":"item-2","kind":"mention","platform":"x","author_handle":"@sam","body":"","read_at":"2026-11-10T09:30:00Z","last_seen_at":"2026-11-10T09:00:00Z"}],"total":9,"sync_states":[],"next_cursor":"next-page"}`))
+	}))
+	defer server.Close()
+	base := []string{"--instance", server.URL, "--token", "op_cli_test", "--workspace", "Production"}
+
+	table, err := executeRootCaptureStdout(t, append(append([]string{}, base...), "inbox", "list")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if json.Valid([]byte(table)) {
+		t.Fatalf("inbox list without --json must print a table, got JSON:\n%s", table)
+	}
+	for _, want := range []string{"ID", "KIND", "STATE", "item-1", "Mina", "unread", "LINK please", "item-2", "@sam", "read", "2 of 9 items shown.", "--cursor next-page"} {
+		if !strings.Contains(table, want) {
+			t.Errorf("table lacks %q:\n%s", want, table)
+		}
+	}
+
+	raw, err := executeRootCaptureStdout(t, append(append([]string{}, base...), "--json", "inbox", "list")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var page map[string]any
+	if err := json.Unmarshal([]byte(raw), &page); err != nil || page["next_cursor"] != "next-page" || page["total"] != float64(9) {
+		t.Fatalf("--json must keep the complete server response, got %v (%v)", page, err)
+	}
 }
