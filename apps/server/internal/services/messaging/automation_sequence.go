@@ -11,6 +11,7 @@ import (
 	"github.com/openpost/backend/internal/models"
 	"github.com/openpost/backend/internal/services/inboxchanges"
 	"github.com/openpost/backend/internal/services/organizationguard"
+	"github.com/openpost/backend/internal/services/workflows"
 	"github.com/openpost/backend/internal/services/workspaceaccess"
 	"github.com/uptrace/bun"
 )
@@ -260,6 +261,15 @@ func commentStopReason(ctx context.Context, db bun.IDB, itemID string) (string, 
 	}
 	if !item.AutomationStoppedAt.IsZero() || !item.DeletedAt.IsZero() {
 		return stopReasonComment, nil
+	}
+	// A commenter who is one of the workspace's accounts sees the same exchange
+	// from the other side, so a follow-up would be matched to the wrong conversation.
+	match, found, err := workflows.FindConnectedAccount(ctx, db, item)
+	if err != nil {
+		return "", err
+	}
+	if found {
+		return match.Reason(), nil
 	}
 	return "", nil
 }

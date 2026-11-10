@@ -20,7 +20,7 @@
 	const canEdit = $derived(['admin', 'editor'].includes(workspaceCtx.currentWorkspace?.role ?? ''));
 	const replies = createQuery(() => ({
 		...commentAutomationQueryOptions(commentAutomationQueryAPI, item.workspace_id, item.id),
-		enabled: Boolean(expanded && item.automation_state),
+		enabled: Boolean(expanded && item.automation_state && item.automation_state !== 'connected_account'),
 		refetchInterval:
 			expanded && ['sending', 'acknowledging', 'ready'].includes(item.automation_state ?? '')
 				? 3000
@@ -39,7 +39,9 @@
 							? m.workflows_comment_failed()
 							: item.automation_state === 'skipped'
 								? m.workflows_comment_skipped()
-								: m.workflows_comment_sending()
+								: item.automation_state === 'connected_account'
+									? m.workflows_comment_connected_account()
+									: m.workflows_comment_sending()
 	);
 	const link = $derived(
 		'/workflows?template=' +
@@ -76,7 +78,11 @@
 
 {#if item.kind === 'comment' && item.platform !== 'x'}
 	<div class="mt-3 space-y-3">
-		{#if item.automation_state}<Disclosure summary={stateLabel} bind:open={expanded}>
+		{#if item.automation_state === 'connected_account'}<InlineNotice
+				tone="info"
+				size="compact"
+				message={stateLabel}
+			/>{:else if item.automation_state}<Disclosure summary={stateLabel} bind:open={expanded}>
 				{#if replies.isError}<InlineNotice
 						tone="error"
 						message={m.workflows_load_failed()}
@@ -92,7 +98,7 @@
 		{#if canEdit}<div class="flex flex-wrap gap-2">
 				{#if canAdmin}<Button variant="ghost" size="sm" href={link}
 						>{m.workflows_comment_automate()}</Button
-					>{/if}{#if item.automation_state && !['sent', 'failed', 'skipped', 'cancelled'].includes(item.automation_state)}<Button
+					>{/if}{#if item.automation_state && !['sent', 'failed', 'skipped', 'cancelled', 'connected_account'].includes(item.automation_state)}<Button
 						variant="outline"
 						size="sm"
 						disabled={busy}

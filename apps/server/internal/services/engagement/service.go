@@ -24,6 +24,7 @@ import (
 	"github.com/openpost/backend/internal/services/notifications"
 	"github.com/openpost/backend/internal/services/organizationguard"
 	"github.com/openpost/backend/internal/services/providerwrite"
+	"github.com/openpost/backend/internal/services/workflows"
 	"github.com/openpost/backend/internal/services/workspaceaccess"
 	"github.com/uptrace/bun"
 )
@@ -2086,7 +2087,49 @@ func (s *Service) loadAutomationSummaries(ctx context.Context, items []models.En
 	for _, reply := range automatic {
 		autoByItem[reply.ItemID] = reply
 	}
+	if err := s.loadConnectedAccountSkips(ctx, items, autoByItem); err != nil {
+		return nil, err
+	}
 	return autoByItem, nil
+}
+
+// AutomationStateConnectedAccount is the Inbox summary of a comment a campaign
+// skipped because its author is an account connected to the workspace. No reply
+// exists for it, so the cancelled run that recorded the reason supplies the state.
+const AutomationStateConnectedAccount = "connected_account"
+
+func (s *Service) loadConnectedAccountSkips(ctx context.Context, items []models.EngagementItem, autoByItem map[string]AutomationReply) error {
+	var pending []models.EngagementItem
+	for _, item := range items {
+		if _, replied := autoByItem[item.ID]; !replied && item.Kind == "comment" {
+			pending = append(pending, item)
+		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	query := s.db.NewSelect().Table("workflow_runs").Column("id", "source_json").Where("workspace_id = ? AND state = 'cancelled' AND error LIKE ?", pending[0].WorkspaceID, workflows.ConnectedAccountSkipPrefix+"%").
+		WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
+			for _, item := range pending {
+				q = q.WhereOr("source_json LIKE ?", `%"engagement_id":"`+item.ID+`"%`)
+			}
+			return q
+		}).Order("created_at ASC")
+	var runs []struct {
+		ID         string `bun:"id"`
+		SourceJSON string `bun:"source_json"`
+	}
+	if err := query.Scan(ctx, &runs); err != nil {
+		return err
+	}
+	for _, run := range runs {
+		for _, item := range pending {
+			if strings.Contains(run.SourceJSON, `"engagement_id":"`+item.ID+`"`) {
+				autoByItem[item.ID] = AutomationReply{ItemID: item.ID, State: AutomationStateConnectedAccount, RunID: run.ID}
+			}
+		}
+	}
+	return nil
 }
 
 func requiresActivityAuthority(item models.EngagementItem, input engagementActionJob) bool {

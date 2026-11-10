@@ -14,6 +14,7 @@ import (
 	"github.com/openpost/backend/internal/platform"
 	"github.com/openpost/backend/internal/services/automationoptout"
 	"github.com/openpost/backend/internal/services/organizationguard"
+	"github.com/openpost/backend/internal/services/workflows"
 	"github.com/openpost/backend/internal/services/workspaceaccess"
 	"github.com/uptrace/bun"
 )
@@ -113,8 +114,24 @@ func (s *Service) automationEligibility(ctx context.Context, db bun.IDB, item mo
 	if err := s.automationAccountEligibility(authority.Account); err != nil {
 		return err
 	}
+	if err := connectedCommenterStop(ctx, db, item); err != nil {
+		return err
+	}
 	if in.Channel == "private" {
 		return s.privateReplyEligibility(item, authority.Account, in.Body)
+	}
+	return nil
+}
+
+// connectedCommenterStop keeps a comment campaign from answering one of the
+// workspace's own accounts, with the same identity rule admission uses.
+func connectedCommenterStop(ctx context.Context, db bun.IDB, item models.EngagementItem) error {
+	match, found, err := workflows.FindConnectedAccount(ctx, db, item)
+	if err != nil {
+		return err
+	}
+	if found {
+		return errors.New(match.Reason())
 	}
 	return nil
 }
@@ -366,6 +383,10 @@ func (s *Service) checkAutomationWrite(ctx context.Context, db bun.IDB, item mod
 		return errors.New("this comment can no longer receive automatic replies")
 	}
 	if err := s.automationAccountEligibility(authority.Account); err != nil {
+		return err
+	}
+	// An account connected after admission still stops the send here.
+	if err := connectedCommenterStop(ctx, db, item); err != nil {
 		return err
 	}
 	return s.checkPrivateAutomationWrite(ctx, db, item, authority.Account, input, reply)
