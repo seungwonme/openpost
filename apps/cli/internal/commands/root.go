@@ -13,6 +13,7 @@
 // ├── publication (format-first create, list, view, validate, publish-now)
 // ├── thread  (create)
 // ├── jobs    (list)
+// ├── workflow (list, get, create, save, publish, pause, stop-replies, delete, runs, run, sample-source, test-node)
 // ├── billing (status, checkout, portal)
 // ├── completion
 // └── doctor  (offline local configuration check)
@@ -98,6 +99,7 @@ func NewRoot(version string) *cobra.Command {
 	root.AddCommand(newThreadCmd())
 	root.AddCommand(newJobsCmd())
 	root.AddCommand(newInboxCmd())
+	root.AddCommand(newWorkflowCmd())
 	root.AddCommand(newBillingCmd())
 	root.AddCommand(newCompletionCmd())
 	root.AddCommand(newDoctorCmd())

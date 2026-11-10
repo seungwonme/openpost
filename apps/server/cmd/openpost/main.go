@@ -966,6 +966,7 @@ func main() {
 	mcpHandler.SetTokenEncryptor(tokenEncryptor)
 	mcpHandler.SetTokenSource(tokenManager)
 	mcpHandler.SetEngagementService(engagementService)
+	mcpHandler.SetWorkflowService(workflowService)
 	mcpHandler.RegisterRoutes(e)
 	mcpOAuthHandler := handlers.NewMCPOAuthHandler(mcpOAuthService, authenticator, cfg.PublicURL)
 	mcpOAuthHandler.SetIdentityService(identityService)

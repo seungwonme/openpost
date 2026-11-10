@@ -414,3 +414,43 @@ func TestSelectedMentionCommandsUseStructuredContracts(t *testing.T) {
 		t.Fatalf("calls create=%d prepare=%d lookup=%d", creates, prepares, lookups)
 	}
 }
+
+func TestPostListShowsDashForPostsWithoutASchedule(t *testing.T) {
+	t.Setenv("OPENPOST_CONFIG_DIR", t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/workspaces":
+			_, _ = w.Write([]byte(`[{"id":"ws-1","name":"Production"}]`))
+		case "/api/v1/workspaces/ws-1/settings":
+			_, _ = w.Write([]byte(`{"timezone":"UTC"}`))
+		case "/api/v1/publications":
+			_, _ = w.Write([]byte(`[
+{"id":"published-now","status":"published","source_text":"Went out immediately","actual_run_at":"2026-11-10T09:00:00Z","renditions":[{"id":"r1"}]},
+{"id":"plain-draft","status":"draft","source_text":"Not scheduled","scheduled_at":"0001-01-01T00:00:00Z","renditions":[]},
+{"id":"queued","status":"scheduled","source_text":"Later","scheduled_at":"2026-11-12T10:00:00Z","renditions":[{"id":"r2"}]}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	out, err := executeRootCaptureStdout(t, "--instance", srv.URL, "--token", "op_cli_test", "--workspace", "Production", "post", "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		if fields := strings.Fields(line); len(fields) > 2 {
+			lines[fields[0]] = strings.Join(fields[1:3], " ")
+		}
+	}
+	if lines["published-now"] != "published -" {
+		t.Errorf("published post without a schedule = %q, want status published and a dash\n%s", lines["published-now"], out)
+	}
+	if lines["plain-draft"] != "draft -" {
+		t.Errorf("unscheduled draft = %q, want status draft and a dash\n%s", lines["plain-draft"], out)
+	}
+	if lines["queued"] != "scheduled 2026-11-12T10:00:00Z" {
+		t.Errorf("scheduled post = %q\n%s", lines["queued"], out)
+	}
+}

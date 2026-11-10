@@ -363,19 +363,21 @@ func TestMCPAnnotationsSafetySplit(t *testing.T) {
 	t.Parallel()
 
 	external := map[string]bool{
-		mcpToolInboxRefresh:   true,
-		mcpToolInboxAction:    true,
-		mcpToolReplyRendition: true,
-		mcpToolSchedulePub:    true,
-		mcpToolCancelPub:      true,
-		mcpToolPublishPubNow:  true,
-		mcpToolRetryFailed:    true,
-		mcpToolRetryOne:       true,
-		mcpToolComments:       true,
-		mcpToolReplyComment:   true,
-		mcpToolHideComment:    true,
-		mcpToolDeleteComment:  true,
-		mcpToolUploadURL:      true,
+		mcpToolInboxRefresh:       true,
+		mcpToolInboxAction:        true,
+		mcpToolReplyRendition:     true,
+		mcpToolSchedulePub:        true,
+		mcpToolCancelPub:          true,
+		mcpToolPublishPubNow:      true,
+		mcpToolRetryFailed:        true,
+		mcpToolRetryOne:           true,
+		mcpToolComments:           true,
+		mcpToolReplyComment:       true,
+		mcpToolHideComment:        true,
+		mcpToolDeleteComment:      true,
+		mcpToolUploadURL:          true,
+		mcpToolWorkflowPublish:    true,
+		mcpToolWorkflowRunApprove: true,
 	}
 	for _, operation := range mcpOperationCatalog() {
 		name, _ := operation.Descriptor["name"].(string)

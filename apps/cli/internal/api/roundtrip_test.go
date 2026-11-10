@@ -31,6 +31,8 @@ var intentionallyOmittedSchemaKeys = map[string]map[string]string{
 	"PublicationResponse": {"$schema": "JSON-Schema document URL, not resource data"},
 	"AccountResponse":     {"$schema": "JSON-Schema document URL, not resource data"},
 	"JobResponse":         {"$schema": "JSON-Schema document URL, not resource data"},
+	"Workflow":            {"$schema": "JSON-Schema document URL, not resource data"},
+	"WorkflowRun":         {"$schema": "JSON-Schema document URL, not resource data"},
 }
 
 func openAPIProperties(t *testing.T, schemaName string) map[string]bool {
@@ -452,4 +454,45 @@ func TestJobJSONProjectionMatchesOpenAPI(t *testing.T) {
 	}`
 	var job Job
 	assertFaithfulProjection(t, "JobResponse", fixture, &job)
+}
+
+func TestWorkflowJSONProjectionsMatchOpenAPI(t *testing.T) {
+	const definition = `{"schema":1,"source":{"kind":"comment_received","keywords":["link"]},"steps":[{"id":"reply","kind":"private_comment_reply","name":"Send DM","inputs":{}}]}`
+	const workflow = `{
+		"id": "wf_1", "workspace_id": "ws_1", "name": "Comment to DM", "description": "Send the link",
+		"revision": 4, "published_revision": 3, "enabled": true, "has_comment_replies": true,
+		"definition": ` + definition + `,
+		"source_error": "token expired", "last_checked_at": "2026-11-10T09:00:00Z",
+		"created_at": "2026-11-01T09:00:00Z", "updated_at": "2026-11-10T09:00:00Z"
+	}`
+	out := assertFaithfulProjection(t, "Workflow", workflow, &Workflow{})
+	if steps := nestedObject(t, out, "definition")["steps"].([]any); len(steps) != 1 {
+		t.Fatalf("definition steps lost: %v", out["definition"])
+	}
+
+	const run = `{
+		"id": "run_1", "workflow_id": "wf_1", "workspace_id": "ws_1", "workflow_name": "Comment to DM",
+		"workflow_revision": 3, "mode": "live", "state": "failed", "revision": 2,
+		"definition": ` + definition + `, "source": {"engagement_id": "e_1"},
+		"steps": [{"step_id": "reply", "kind": "private_comment_reply", "name": "Send DM", "state": "failed",
+			"inputs": {"text": "hi"}, "output": {"reason": "stopped"}, "error": "refused",
+			"started_at": "2026-11-10T09:00:00Z", "completed_at": "2026-11-10T09:00:01Z"}],
+		"current_step_id": "reply", "error": "step failed", "wake_at": "2026-11-10T10:00:00Z",
+		"created_at": "2026-11-10T09:00:00Z", "updated_at": "2026-11-10T09:00:01Z"
+	}`
+	out = assertFaithfulProjection(t, "WorkflowRun", run, &WorkflowRun{})
+	assertKeysPresent(t, "WorkflowStepResult", nestedArrayItem(t, out, "steps"), "WorkflowRun.steps")
+
+	const summary = `{
+		"id": "run_1", "workflow_id": "wf_1", "workspace_id": "ws_1", "workflow_name": "Comment to DM",
+		"workflow_revision": 3, "mode": "live", "state": "cancelled", "revision": 2,
+		"definition": ` + definition + `, "steps": [{"step_id": "reply", "state": "cancelled"}],
+		"current_step_id": "reply", "error": "daily limit", "wake_at": "2026-11-10T10:00:00Z",
+		"created_at": "2026-11-10T09:00:00Z", "updated_at": "2026-11-10T09:00:01Z"
+	}`
+	out = assertFaithfulProjection(t, "WorkflowRunSummary", summary, &WorkflowRunSummary{})
+	assertKeysPresent(t, "WorkflowStepSummary", nestedArrayItem(t, out, "steps"), "WorkflowRunSummary.steps")
+
+	const item = `{"id":"c_1","title":"t","body":"b","url":"https://example.test","account_id":"a","author_name":"n","conversation_id":"cv","created_at":"x","engagement_id":"e","message_id":"m","platform":"instagram","publication_id":"p","published_at":"x","rendition_id":"r"}`
+	assertFaithfulProjection(t, "WorkflowSourceItem", item, &WorkflowSourceItem{})
 }

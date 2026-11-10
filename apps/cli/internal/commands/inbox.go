@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/openpost/cli/internal/api"
+	"github.com/openpost/cli/internal/output"
 	"github.com/spf13/cobra"
 )
 
@@ -22,6 +23,12 @@ func newInboxCmd() *cobra.Command {
 type inboxRequest func(*cobra.Command, *api.Client, string) (json.RawMessage, error)
 
 func runInboxRequest(request inboxRequest) func(*cobra.Command, []string) error {
+	return runInboxRequestRendered(request, nil)
+}
+
+// runInboxRequestRendered prints the complete server response as JSON. A
+// non-nil render replaces that output with a human view unless --json is set.
+func runInboxRequestRendered(request inboxRequest, render func(*output.Printer, json.RawMessage) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, _ []string) error {
 		cfg, err := runtimeFrom(cmd)
 		if err != nil {
@@ -42,8 +49,65 @@ func runInboxRequest(request inboxRequest) func(*cobra.Command, []string) error 
 		if len(result) == 0 {
 			result = json.RawMessage(`{"updated":true}`)
 		}
-		return printerFrom(cfg).PrintJSON(result)
+		p := printerFrom(cfg)
+		if render != nil && !cfg.AsJSON {
+			return render(p, result)
+		}
+		return p.PrintJSON(result)
 	}
+}
+
+type inboxListItem struct {
+	ID              string `json:"id"`
+	Kind            string `json:"kind"`
+	Platform        string `json:"platform"`
+	AuthorName      string `json:"author_name"`
+	AuthorHandle    string `json:"author_handle"`
+	Body            string `json:"body"`
+	ReadAt          string `json:"read_at"`
+	ArchivedAt      string `json:"archived_at"`
+	LastSeenAt      string `json:"last_seen_at"`
+	RemoteCreatedAt string `json:"remote_created_at"`
+}
+
+func renderInboxList(p *output.Printer, result json.RawMessage) error {
+	var page struct {
+		Items      []inboxListItem `json:"items"`
+		Total      int             `json:"total"`
+		NextCursor string          `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(result, &page); err != nil {
+		return fmt.Errorf("decode Inbox response: %w", err)
+	}
+	if len(page.Items) == 0 {
+		p.Printf("No Inbox items.")
+		return nil
+	}
+	rows := make([][]string, 0, len(page.Items))
+	for _, item := range page.Items {
+		state := "unread"
+		switch {
+		case item.ArchivedAt != "":
+			state = "archived"
+		case item.ReadAt != "":
+			state = "read"
+		}
+		author := item.AuthorName
+		if author == "" {
+			author = item.AuthorHandle
+		}
+		when := item.RemoteCreatedAt
+		if when == "" {
+			when = item.LastSeenAt
+		}
+		rows = append(rows, []string{item.ID, emptyDash(item.Kind), emptyDash(item.Platform), emptyDash(author), state, emptyDash(when), emptyDash(preview(item.Body, 60))})
+	}
+	p.Table([]string{"ID", "KIND", "PLATFORM", "AUTHOR", "STATE", "WHEN", "BODY"}, rows)
+	p.Printf("%d of %d items shown.", len(page.Items), page.Total)
+	if page.NextCursor != "" {
+		p.Printf("More items: pass --cursor %s", page.NextCursor)
+	}
+	return nil
 }
 
 func inboxFilterFlags(cmd *cobra.Command) {
@@ -75,7 +139,7 @@ func newInboxListCmd() *cobra.Command {
 	cmd.Flags().Bool("unread", false, "only unread items")
 	cmd.Flags().Int("limit", 50, "page size, from 1 to 100")
 	cmd.Flags().String("cursor", "", "next_cursor from the previous response")
-	cmd.RunE = runInboxRequest(func(cmd *cobra.Command, client *api.Client, workspace string) (json.RawMessage, error) {
+	cmd.RunE = runInboxRequestRendered(func(cmd *cobra.Command, client *api.Client, workspace string) (json.RawMessage, error) {
 		filters, err := inboxFilters(cmd, workspace)
 		if err != nil {
 			return nil, err
@@ -96,7 +160,7 @@ func newInboxListCmd() *cobra.Command {
 		var result json.RawMessage
 		err = client.GetJSON(cmd.Context(), "/api/v1/engagement?"+query.Encode(), &result)
 		return result, err
-	})
+	}, renderInboxList)
 	return cmd
 }
 

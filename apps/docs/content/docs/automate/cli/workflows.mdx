@@ -1,0 +1,85 @@
+---
+title: Manage workflows
+description: Create, publish, pause, inspect, and delete Workflows from the terminal.
+icon: Workflow
+---
+
+`openpost workflow` manages the same [Workflows](/workflows) as the web app. It uses the same permissions, workspace boundary, and revision checks. Every command accepts `--json`.
+
+Token access follows the HTTP API: `api:read` reads workflows and runs, `api:write` changes them, and `cli:full` does both. Publishing, deleting, and approving still need the workspace role the web app requires.
+
+## Read workflows and runs
+
+```sh
+openpost workflow list
+openpost workflow get WORKFLOW_ID
+openpost workflow runs WORKFLOW_ID
+openpost workflow run RUN_ID
+```
+
+`get` shows the state (`draft`, `active`, or `paused`), the draft **revision**, the **published revision**, and the last source check. `runs` lists the latest 50 runs with their state and **stop reason**. `run` shows each step's state, error, and recorded output. A stop reason is the text the server recorded, such as a sender's daily limit, a conversation takeover, or a comment written by a connected account. The CLI prints it unchanged.
+
+## Create and edit from a file
+
+Save a workflow to a file, edit it, and send it back:
+
+```sh
+openpost --json workflow get WORKFLOW_ID > workflow.json
+# edit workflow.json
+openpost workflow save WORKFLOW_ID --file workflow.json
+```
+
+A file is either a bare definition (`schema`, `source`, `steps`) or an object with `name`, `description`, and `definition`, as `get --json` prints. Create a new draft the same way:
+
+```sh
+openpost workflow create --file definition.json --name "Comment to DM"
+```
+
+A new draft is disabled and runs nothing. The server validates the definition exactly as the editor does, and the command prints the new revision.
+
+## Revisions and conflicts
+
+`save` sends the revision your edit started from. A file from `get --json` carries it. For a hand-written file, pass `--expected-revision`. The CLI does not fill in a missing revision for `save`, because that would overwrite changes you have not seen.
+
+`publish`, `pause`, `stop-replies`, `test-node`, `run approve`, and `run cancel` read the current revision first when you omit `--expected-revision`. Pass it explicitly in scripts so the command acts on the revision you inspected.
+
+If the revision is no longer current, the server answers `409`. The command fails with that message and changes nothing. The CLI never retries or overwrites. Read the workflow or run again, check what changed, and decide whether to repeat the command.
+
+## Publish, pause, and delete
+
+```sh
+openpost workflow publish WORKFLOW_ID
+openpost workflow pause WORKFLOW_ID
+openpost workflow stop-replies WORKFLOW_ID
+openpost workflow delete WORKFLOW_ID
+```
+
+- `publish` enables the draft revision. New matching activity then starts runs, which can send replies, so it asks for confirmation.
+- `pause` stops new automatic runs. Existing runs and pending replies continue.
+- `stop-replies` stops new runs and cancels pending automatic comment replies.
+- `delete` removes a paused workflow with no active runs, together with its run history. Posts it created remain.
+
+Commands that publish, send, cancel, or delete ask for confirmation. Pass `--yes` to skip the prompt. With `--json` and no `--yes`, they fail instead of prompting.
+
+## Review and cancel runs
+
+```sh
+openpost workflow run approve RUN_ID --post-revision 12
+openpost workflow run approve RUN_ID --reply-text "Thanks, the link is in your messages."
+openpost workflow run cancel RUN_ID
+```
+
+Approving a post review binds the approval to the post revision you reviewed. Read the post with `openpost publication view POST_ID`, then pass its revision as `--post-revision`. If the post changed since, the server refuses and nothing is approved. For a reviewed reply, `--reply-text` replaces the proposed text. Cancelling stops the remaining steps. An action already dispatched may finish, and drafts or queued posts remain.
+
+## Check without provider writes
+
+```sh
+openpost workflow sample-source WORKFLOW_ID
+openpost workflow test-node WORKFLOW_ID --step STEP_ID --data sample.json
+```
+
+`sample-source` reads example items from the draft's source. It advances no cursor and starts no run. `test-node` runs one data or tool step with the JSON object you supply. Publication and reply steps are refused; use a preview run in the web app for those.
+
+## Use workflows from an assistant
+
+The MCP server exposes the same operations. Read tools: `list_workflows`, `get_workflow`, `list_workflow_runs`, `get_workflow_run`. Change tools: `create_workflow`, `save_workflow`, `publish_workflow`, `pause_workflow`, `stop_workflow_replies`, `delete_workflow`, `approve_workflow_run`, `cancel_workflow_run`. Change tools are marked destructive so clients can ask for approval, and they are refused for `mcp:read` tokens. See [MCP use cases](/mcp/mcp-guide/use-cases).

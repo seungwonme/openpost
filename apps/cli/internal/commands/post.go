@@ -639,9 +639,12 @@ func authoredRenditionInput(rendition api.Rendition, canonical []api.Publication
 	return out, nil
 }
 
+// scheduleLabel renders a scheduled_at value. A publication with no schedule
+// shows "-" like every other empty table cell; its STATUS column already says
+// whether it is a draft or has been published.
 func scheduleLabel(s string) string {
 	if strings.TrimSpace(s) == "" || strings.HasPrefix(s, "0001-01-01") {
-		return "draft"
+		return "-"
 	}
 	return s
 }

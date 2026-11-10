@@ -54,6 +54,7 @@ openpost [flags]
 | `openpost schedule`    | Manage reusable posting schedule slots                           |
 | `openpost thread`      | Create multi-post threads                                        |
 | `openpost version`     | Print the openpost CLI version                                   |
+| `openpost workflow`    | Create, publish, pause and inspect workflows                     |
 | `openpost workspace`   | Manage the active OpenPost workspace                             |
 
 ### `openpost account`
@@ -2371,6 +2372,458 @@ Print the openpost CLI version
 ```text
 openpost version
 ```
+
+**Inherited Flags**
+
+| Flag          | Default | Description                                                        |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--instance`  | `-`     | OpenPost instance URL (default: profile or $OPENPOST_INSTANCE)     |
+| `--json`      | `false` | emit machine-readable JSON instead of tables/prose                 |
+| `--no-color`  | `false` | disable ANSI colors                                                |
+| `--profile`   | `-`     | profile name from config (default: $OPENPOST_PROFILE or 'default') |
+| `--quiet`     | `false` | suppress non-error output                                          |
+| `--token`     | `-`     | API token override (default: keyring or $OPENPOST_TOKEN)           |
+| `--workspace` | `-`     | workspace name or ID (default: profile or $OPENPOST_WORKSPACE)     |
+| `--yes`       | `false` | skip interactive confirmations                                     |
+
+### `openpost workflow`
+
+Create, publish, pause and inspect workflows
+
+**Usage**
+
+```text
+openpost workflow
+```
+
+**Inherited Flags**
+
+| Flag          | Default | Description                                                        |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--instance`  | `-`     | OpenPost instance URL (default: profile or $OPENPOST_INSTANCE)     |
+| `--json`      | `false` | emit machine-readable JSON instead of tables/prose                 |
+| `--no-color`  | `false` | disable ANSI colors                                                |
+| `--profile`   | `-`     | profile name from config (default: $OPENPOST_PROFILE or 'default') |
+| `--quiet`     | `false` | suppress non-error output                                          |
+| `--token`     | `-`     | API token override (default: keyring or $OPENPOST_TOKEN)           |
+| `--workspace` | `-`     | workspace name or ID (default: profile or $OPENPOST_WORKSPACE)     |
+| `--yes`       | `false` | skip interactive confirmations                                     |
+
+**Subcommands**
+
+| Command                           | Description                                                      |
+| --------------------------------- | ---------------------------------------------------------------- |
+| `openpost workflow create`        | Create a workflow draft from a JSON file                         |
+| `openpost workflow delete`        | Delete a paused workflow with no active runs                     |
+| `openpost workflow get`           | Show a workflow, its revisions and definition                    |
+| `openpost workflow list`          | List workflows                                                   |
+| `openpost workflow pause`         | Stop new automatic runs; existing runs continue                  |
+| `openpost workflow publish`       | Publish the draft revision and enable its source                 |
+| `openpost workflow run`           | Show a run's steps, effects and errors; approve or cancel it     |
+| `openpost workflow runs`          | List the latest runs with state and stop reason                  |
+| `openpost workflow sample-source` | Read example items from a workflow's source without side effects |
+| `openpost workflow save`          | Replace a workflow draft, checking its revision                  |
+| `openpost workflow stop-replies`  | Stop new runs and cancel pending automatic replies               |
+| `openpost workflow test-node`     | Run one data or tool step with supplied input data               |
+
+### `openpost workflow create`
+
+Create a workflow draft from a JSON file
+
+Create a workflow draft. The file is a definition ({"schema":1,"source":{...},"steps":[...]}) or an object with name, description and definition. The draft is disabled and runs nothing until `workflow publish`.
+
+**Usage**
+
+```text
+openpost workflow create --file &lt;definition.json&gt; [flags]
+```
+
+**Flags**
+
+| Flag            | Default | Description                                                 |
+| --------------- | ------- | ----------------------------------------------------------- |
+| `--description` | `-`     | workflow description (default: the description in the file) |
+| `--file`        | `-`     | workflow definition JSON file, or - for stdin               |
+| `--name`        | `-`     | workflow name (default: the name in the file)               |
+
+**Inherited Flags**
+
+| Flag          | Default | Description                                                        |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--instance`  | `-`     | OpenPost instance URL (default: profile or $OPENPOST_INSTANCE)     |
+| `--json`      | `false` | emit machine-readable JSON instead of tables/prose                 |
+| `--no-color`  | `false` | disable ANSI colors                                                |
+| `--profile`   | `-`     | profile name from config (default: $OPENPOST_PROFILE or 'default') |
+| `--quiet`     | `false` | suppress non-error output                                          |
+| `--token`     | `-`     | API token override (default: keyring or $OPENPOST_TOKEN)           |
+| `--workspace` | `-`     | workspace name or ID (default: profile or $OPENPOST_WORKSPACE)     |
+| `--yes`       | `false` | skip interactive confirmations                                     |
+
+### `openpost workflow delete`
+
+Delete a paused workflow with no active runs
+
+Permanently delete a paused workflow that has no active runs, together with its run history. Posts it created remain.
+
+**Usage**
+
+```text
+openpost workflow delete &lt;workflow-id&gt;
+```
+
+**Inherited Flags**
+
+| Flag          | Default | Description                                                        |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--instance`  | `-`     | OpenPost instance URL (default: profile or $OPENPOST_INSTANCE)     |
+| `--json`      | `false` | emit machine-readable JSON instead of tables/prose                 |
+| `--no-color`  | `false` | disable ANSI colors                                                |
+| `--profile`   | `-`     | profile name from config (default: $OPENPOST_PROFILE or 'default') |
+| `--quiet`     | `false` | suppress non-error output                                          |
+| `--token`     | `-`     | API token override (default: keyring or $OPENPOST_TOKEN)           |
+| `--workspace` | `-`     | workspace name or ID (default: profile or $OPENPOST_WORKSPACE)     |
+| `--yes`       | `false` | skip interactive confirmations                                     |
+
+### `openpost workflow get`
+
+Show a workflow, its revisions and definition
+
+Show a workflow's state, revision, published revision and last source check. With --json the output is the complete workflow; edit its definition and pass the file to `workflow save --file` to change it.
+
+**Usage**
+
+```text
+openpost workflow get &lt;workflow-id&gt;
+```
+
+**Inherited Flags**
+
+| Flag          | Default | Description                                                        |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--instance`  | `-`     | OpenPost instance URL (default: profile or $OPENPOST_INSTANCE)     |
+| `--json`      | `false` | emit machine-readable JSON instead of tables/prose                 |
+| `--no-color`  | `false` | disable ANSI colors                                                |
+| `--profile`   | `-`     | profile name from config (default: $OPENPOST_PROFILE or 'default') |
+| `--quiet`     | `false` | suppress non-error output                                          |
+| `--token`     | `-`     | API token override (default: keyring or $OPENPOST_TOKEN)           |
+| `--workspace` | `-`     | workspace name or ID (default: profile or $OPENPOST_WORKSPACE)     |
+| `--yes`       | `false` | skip interactive confirmations                                     |
+
+### `openpost workflow list`
+
+List workflows
+
+**Usage**
+
+```text
+openpost workflow list
+```
+
+**Inherited Flags**
+
+| Flag          | Default | Description                                                        |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--instance`  | `-`     | OpenPost instance URL (default: profile or $OPENPOST_INSTANCE)     |
+| `--json`      | `false` | emit machine-readable JSON instead of tables/prose                 |
+| `--no-color`  | `false` | disable ANSI colors                                                |
+| `--profile`   | `-`     | profile name from config (default: $OPENPOST_PROFILE or 'default') |
+| `--quiet`     | `false` | suppress non-error output                                          |
+| `--token`     | `-`     | API token override (default: keyring or $OPENPOST_TOKEN)           |
+| `--workspace` | `-`     | workspace name or ID (default: profile or $OPENPOST_WORKSPACE)     |
+| `--yes`       | `false` | skip interactive confirmations                                     |
+
+### `openpost workflow pause`
+
+Stop new automatic runs; existing runs continue
+
+Stop new automatic runs. Existing runs and pending replies continue; use stop-replies for pending replies.
+
+**Usage**
+
+```text
+openpost workflow pause &lt;workflow-id&gt; [flags]
+```
+
+**Flags**
+
+| Flag                  | Default | Description                                                      |
+| --------------------- | ------- | ---------------------------------------------------------------- |
+| `--expected-revision` | `0`     | workflow revision to act on (default: read the current revision) |
+
+**Inherited Flags**
+
+| Flag          | Default | Description                                                        |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--instance`  | `-`     | OpenPost instance URL (default: profile or $OPENPOST_INSTANCE)     |
+| `--json`      | `false` | emit machine-readable JSON instead of tables/prose                 |
+| `--no-color`  | `false` | disable ANSI colors                                                |
+| `--profile`   | `-`     | profile name from config (default: $OPENPOST_PROFILE or 'default') |
+| `--quiet`     | `false` | suppress non-error output                                          |
+| `--token`     | `-`     | API token override (default: keyring or $OPENPOST_TOKEN)           |
+| `--workspace` | `-`     | workspace name or ID (default: profile or $OPENPOST_WORKSPACE)     |
+| `--yes`       | `false` | skip interactive confirmations                                     |
+
+### `openpost workflow publish`
+
+Publish the draft revision and enable its source
+
+Publish a workflow's draft revision and enable its source. New matching activity then starts runs, which can send replies.
+
+**Usage**
+
+```text
+openpost workflow publish &lt;workflow-id&gt; [flags]
+```
+
+**Flags**
+
+| Flag                  | Default | Description                                                      |
+| --------------------- | ------- | ---------------------------------------------------------------- |
+| `--expected-revision` | `0`     | workflow revision to act on (default: read the current revision) |
+
+**Inherited Flags**
+
+| Flag          | Default | Description                                                        |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--instance`  | `-`     | OpenPost instance URL (default: profile or $OPENPOST_INSTANCE)     |
+| `--json`      | `false` | emit machine-readable JSON instead of tables/prose                 |
+| `--no-color`  | `false` | disable ANSI colors                                                |
+| `--profile`   | `-`     | profile name from config (default: $OPENPOST_PROFILE or 'default') |
+| `--quiet`     | `false` | suppress non-error output                                          |
+| `--token`     | `-`     | API token override (default: keyring or $OPENPOST_TOKEN)           |
+| `--workspace` | `-`     | workspace name or ID (default: profile or $OPENPOST_WORKSPACE)     |
+| `--yes`       | `false` | skip interactive confirmations                                     |
+
+### `openpost workflow run`
+
+Show a run's steps, effects and errors; approve or cancel it
+
+Show one run: its state, stop reason, and each step's state, error and recorded output. With --json the output is the complete run, including every step's inputs and output.
+
+**Usage**
+
+```text
+openpost workflow run &lt;run-id&gt;
+```
+
+**Inherited Flags**
+
+| Flag          | Default | Description                                                        |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--instance`  | `-`     | OpenPost instance URL (default: profile or $OPENPOST_INSTANCE)     |
+| `--json`      | `false` | emit machine-readable JSON instead of tables/prose                 |
+| `--no-color`  | `false` | disable ANSI colors                                                |
+| `--profile`   | `-`     | profile name from config (default: $OPENPOST_PROFILE or 'default') |
+| `--quiet`     | `false` | suppress non-error output                                          |
+| `--token`     | `-`     | API token override (default: keyring or $OPENPOST_TOKEN)           |
+| `--workspace` | `-`     | workspace name or ID (default: profile or $OPENPOST_WORKSPACE)     |
+| `--yes`       | `false` | skip interactive confirmations                                     |
+
+**Subcommands**
+
+| Command                         | Description                              |
+| ------------------------------- | ---------------------------------------- |
+| `openpost workflow run approve` | Approve a run that is waiting for review |
+| `openpost workflow run cancel`  | Cancel the remaining steps of a run      |
+
+### `openpost workflow run approve`
+
+Approve a run that is waiting for review
+
+Approve a run waiting for review and continue it. Approving a post review needs --post-revision, the post revision you reviewed (see `openpost publication view`); if the post changed since, the server refuses and nothing is approved. For a reviewed reply, --reply-text replaces the proposed text.
+
+**Usage**
+
+```text
+openpost workflow run approve &lt;run-id&gt; [flags]
+```
+
+**Flags**
+
+| Flag                  | Default | Description                                                 |
+| --------------------- | ------- | ----------------------------------------------------------- |
+| `--expected-revision` | `0`     | run revision to act on (default: read the current revision) |
+| `--post-revision`     | `0`     | post revision that was reviewed (required for post reviews) |
+| `--reply-text`        | `-`     | replacement text for a reviewed comment or message reply    |
+
+**Inherited Flags**
+
+| Flag          | Default | Description                                                        |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--instance`  | `-`     | OpenPost instance URL (default: profile or $OPENPOST_INSTANCE)     |
+| `--json`      | `false` | emit machine-readable JSON instead of tables/prose                 |
+| `--no-color`  | `false` | disable ANSI colors                                                |
+| `--profile`   | `-`     | profile name from config (default: $OPENPOST_PROFILE or 'default') |
+| `--quiet`     | `false` | suppress non-error output                                          |
+| `--token`     | `-`     | API token override (default: keyring or $OPENPOST_TOKEN)           |
+| `--workspace` | `-`     | workspace name or ID (default: profile or $OPENPOST_WORKSPACE)     |
+| `--yes`       | `false` | skip interactive confirmations                                     |
+
+### `openpost workflow run cancel`
+
+Cancel the remaining steps of a run
+
+Cancel the remaining steps of a run. An action already dispatched may finish, and drafts or queued posts it created remain.
+
+**Usage**
+
+```text
+openpost workflow run cancel &lt;run-id&gt; [flags]
+```
+
+**Flags**
+
+| Flag                  | Default | Description                                                 |
+| --------------------- | ------- | ----------------------------------------------------------- |
+| `--expected-revision` | `0`     | run revision to act on (default: read the current revision) |
+
+**Inherited Flags**
+
+| Flag          | Default | Description                                                        |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--instance`  | `-`     | OpenPost instance URL (default: profile or $OPENPOST_INSTANCE)     |
+| `--json`      | `false` | emit machine-readable JSON instead of tables/prose                 |
+| `--no-color`  | `false` | disable ANSI colors                                                |
+| `--profile`   | `-`     | profile name from config (default: $OPENPOST_PROFILE or 'default') |
+| `--quiet`     | `false` | suppress non-error output                                          |
+| `--token`     | `-`     | API token override (default: keyring or $OPENPOST_TOKEN)           |
+| `--workspace` | `-`     | workspace name or ID (default: profile or $OPENPOST_WORKSPACE)     |
+| `--yes`       | `false` | skip interactive confirmations                                     |
+
+### `openpost workflow runs`
+
+List the latest runs with state and stop reason
+
+List the latest 50 runs, for one workflow or for the whole workspace. STOP REASON is the reason the server recorded when it ended or refused a run, such as a sender's daily limit. Use `workflow run &lt;run-id&gt;` for step results.
+
+**Usage**
+
+```text
+openpost workflow runs [workflow-id]
+```
+
+**Inherited Flags**
+
+| Flag          | Default | Description                                                        |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--instance`  | `-`     | OpenPost instance URL (default: profile or $OPENPOST_INSTANCE)     |
+| `--json`      | `false` | emit machine-readable JSON instead of tables/prose                 |
+| `--no-color`  | `false` | disable ANSI colors                                                |
+| `--profile`   | `-`     | profile name from config (default: $OPENPOST_PROFILE or 'default') |
+| `--quiet`     | `false` | suppress non-error output                                          |
+| `--token`     | `-`     | API token override (default: keyring or $OPENPOST_TOKEN)           |
+| `--workspace` | `-`     | workspace name or ID (default: profile or $OPENPOST_WORKSPACE)     |
+| `--yes`       | `false` | skip interactive confirmations                                     |
+
+### `openpost workflow sample-source`
+
+Read example items from a workflow's source without side effects
+
+Read example items from the source of a workflow's draft. It advances no production cursor, starts no run and writes nothing to a provider.
+
+**Usage**
+
+```text
+openpost workflow sample-source &lt;workflow-id&gt;
+```
+
+**Inherited Flags**
+
+| Flag          | Default | Description                                                        |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--instance`  | `-`     | OpenPost instance URL (default: profile or $OPENPOST_INSTANCE)     |
+| `--json`      | `false` | emit machine-readable JSON instead of tables/prose                 |
+| `--no-color`  | `false` | disable ANSI colors                                                |
+| `--profile`   | `-`     | profile name from config (default: $OPENPOST_PROFILE or 'default') |
+| `--quiet`     | `false` | suppress non-error output                                          |
+| `--token`     | `-`     | API token override (default: keyring or $OPENPOST_TOKEN)           |
+| `--workspace` | `-`     | workspace name or ID (default: profile or $OPENPOST_WORKSPACE)     |
+| `--yes`       | `false` | skip interactive confirmations                                     |
+
+### `openpost workflow save`
+
+Replace a workflow draft, checking its revision
+
+Replace a workflow draft and print its new revision. The save fails with the server's revision conflict, and nothing is overwritten, when the workflow changed since the revision you pass. The expected revision is --expected-revision, or the "revision" of a file saved from `workflow get --json`. It is never filled in from the server, because that would overwrite changes you have not seen. A published workflow keeps running its published revision until `workflow publish`.
+
+**Usage**
+
+```text
+openpost workflow save &lt;workflow-id&gt; --file &lt;definition.json&gt; --expected-revision &lt;n&gt; [flags]
+```
+
+**Flags**
+
+| Flag                  | Default | Description                                                 |
+| --------------------- | ------- | ----------------------------------------------------------- |
+| `--description`       | `-`     | workflow description (default: the description in the file) |
+| `--expected-revision` | `0`     | workflow revision this edit is based on                     |
+| `--file`              | `-`     | workflow definition JSON file, or - for stdin               |
+| `--name`              | `-`     | workflow name (default: the name in the file)               |
+
+**Inherited Flags**
+
+| Flag          | Default | Description                                                        |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--instance`  | `-`     | OpenPost instance URL (default: profile or $OPENPOST_INSTANCE)     |
+| `--json`      | `false` | emit machine-readable JSON instead of tables/prose                 |
+| `--no-color`  | `false` | disable ANSI colors                                                |
+| `--profile`   | `-`     | profile name from config (default: $OPENPOST_PROFILE or 'default') |
+| `--quiet`     | `false` | suppress non-error output                                          |
+| `--token`     | `-`     | API token override (default: keyring or $OPENPOST_TOKEN)           |
+| `--workspace` | `-`     | workspace name or ID (default: profile or $OPENPOST_WORKSPACE)     |
+| `--yes`       | `false` | skip interactive confirmations                                     |
+
+### `openpost workflow stop-replies`
+
+Stop new runs and cancel pending automatic replies
+
+Stop new runs and cancel pending automatic comment replies.
+
+**Usage**
+
+```text
+openpost workflow stop-replies &lt;workflow-id&gt; [flags]
+```
+
+**Flags**
+
+| Flag                  | Default | Description                                                      |
+| --------------------- | ------- | ---------------------------------------------------------------- |
+| `--expected-revision` | `0`     | workflow revision to act on (default: read the current revision) |
+
+**Inherited Flags**
+
+| Flag          | Default | Description                                                        |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--instance`  | `-`     | OpenPost instance URL (default: profile or $OPENPOST_INSTANCE)     |
+| `--json`      | `false` | emit machine-readable JSON instead of tables/prose                 |
+| `--no-color`  | `false` | disable ANSI colors                                                |
+| `--profile`   | `-`     | profile name from config (default: $OPENPOST_PROFILE or 'default') |
+| `--quiet`     | `false` | suppress non-error output                                          |
+| `--token`     | `-`     | API token override (default: keyring or $OPENPOST_TOKEN)           |
+| `--workspace` | `-`     | workspace name or ID (default: profile or $OPENPOST_WORKSPACE)     |
+| `--yes`       | `false` | skip interactive confirmations                                     |
+
+### `openpost workflow test-node`
+
+Run one data or tool step with supplied input data
+
+Run a single data or tool step of the saved draft with the JSON object you supply as its source data. Publication and reply steps are refused. The result is stored in run history.
+
+**Usage**
+
+```text
+openpost workflow test-node &lt;workflow-id&gt; --step &lt;step-id&gt; [flags]
+```
+
+**Flags**
+
+| Flag                  | Default | Description                                                      |
+| --------------------- | ------- | ---------------------------------------------------------------- |
+| `--data`              | `-`     | JSON file with the input data object, or - for stdin             |
+| `--expected-revision` | `0`     | workflow revision to act on (default: read the current revision) |
+| `--step`              | `-`     | ID of the step to run                                            |
 
 **Inherited Flags**
 
