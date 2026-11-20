@@ -466,9 +466,9 @@ func writeManagedEditionReviewPurchaseTerms(fallback *strings.Builder) {
 // name, a description, and the policy links on the sign-in entry points. The
 // client app removes it as soon as it starts.
 const brandShell = `<main data-openpost-brand-shell style="box-sizing:border-box;max-width:42rem;margin:0 auto;padding:4rem 1.5rem;font:16px/1.6 system-ui,sans-serif;color:CanvasText;background:Canvas">
-		<h1 style="font-size:2rem;line-height:1.2">OpenPost</h1>
-		<p>OpenPost schedules and publishes content across multiple social platforms.</p>
-		<nav aria-label="OpenPost">
+		<h1 style="font-size:2rem;line-height:1.2">Aiden OpenPost</h1>
+		<p>Aiden OpenPost schedules and publishes content across multiple social platforms.</p>
+		<nav aria-label="Aiden OpenPost">
 			<a href="/login">Sign in</a>
 			<span aria-hidden="true"> · </span>
 			<a href="/about">About</a>
@@ -509,7 +509,7 @@ func renderManagedEditionMetadata(indexData []byte, requestPath string) []byte {
 		return []byte(htmlDocument)
 	}
 	if requestPath == "/" {
-		htmlDocument = strings.Replace(htmlDocument, "<title>OpenPost</title>", "", 1)
+		htmlDocument = strings.Replace(htmlDocument, "<title>Aiden OpenPost</title>", "", 1)
 		htmlDocument = strings.Replace(htmlDocument, "</head>", managedEditionReviewMetadata+"\n\t</head>", 1)
 	}
 	if !strings.Contains(htmlDocument, "</body>") {
