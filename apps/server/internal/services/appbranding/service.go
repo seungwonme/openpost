@@ -102,7 +102,7 @@ type Service struct {
 func New(db *bun.DB, storage mediastore.BlobStorage) *Service {
 	return &Service{db: db, storage: storage}
 }
-func Default() Profile { return Profile{DisplayName: "OpenPost"} }
+func Default() Profile { return Profile{DisplayName: "Aiden OpenPost"} }
 func scope(organizationID, workspaceID string) string {
 	if workspaceID != "" {
 		return "workspace:" + workspaceID
