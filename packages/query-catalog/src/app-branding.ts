@@ -25,7 +25,7 @@ export function appBrandingQueryOptions(api: AppBrandingQueryAPI, workspaceId: s
   };
 }
 
-export const defaultAppBranding: AppBrandingProfile = { display_name: "OpenPost" };
+export const defaultAppBranding: AppBrandingProfile = { display_name: "Aiden OpenPost" };
 
 // Dark-specific artwork is optional. Uploaded colors are never tinted by themes.
 export function appBrandingImage(profile: AppBrandingProfile, dark: boolean, wordmark = false) {
