@@ -128,7 +128,7 @@ func TestAboutPageServedAsStaticHTML(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code, target)
 		body := rec.Body.String()
 		for _, want := range []string{
-			"<title>OpenPost 소개 / About OpenPost | post.aidenahn.com</title>",
+			"<title>Aiden OpenPost 소개 / About Aiden OpenPost | post.aidenahn.com</title>",
 			`lang="ko"`,
 			`lang="en"`,
 			`href="/privacy"`,
@@ -159,7 +159,7 @@ func TestPublicPagesShareOpenPostNameAndIcon(t *testing.T) {
 	require.NoError(t, err)
 
 	files := fstest.MapFS{
-		"index.html":  {Data: []byte(`<html><head><title>OpenPost</title></head><body><div id="app"></div></body></html>`)},
+		"index.html":  {Data: []byte(`<html><head><title>Aiden OpenPost</title></head><body><div id="app"></div></body></html>`)},
 		"favicon.ico": {Data: favicon},
 	}
 	for _, name := range []string{"about.html", "privacy.html", "terms.html"} {
@@ -183,13 +183,13 @@ func TestPublicPagesShareOpenPostNameAndIcon(t *testing.T) {
 		e.ServeHTTP(rec, req)
 		require.Equal(t, http.StatusOK, rec.Code, target)
 		body := rec.Body.String()
-		require.Regexp(t, `<title>[^<]*OpenPost[^<]*</title>`, body, target)
+		require.Regexp(t, `<title>[^<]*Aiden OpenPost[^<]*</title>`, body, target)
 	}
 	for _, target := range []string{"/", "/login"} {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, target, nil)
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, req)
-		require.Contains(t, rec.Body.String(), "<h1 style=\"font-size:2rem;line-height:1.2\">OpenPost</h1>", target)
+		require.Contains(t, rec.Body.String(), "<h1 style=\"font-size:2rem;line-height:1.2\">Aiden OpenPost</h1>", target)
 	}
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/favicon.ico", nil)
