@@ -150,3 +150,52 @@ func TestAboutPageServedAsStaticHTML(t *testing.T) {
 		require.NotContains(t, body, "mailto:", "page must not publish an email address")
 	}
 }
+
+// TikTok app review compares the app name and icon with the website: every
+// public page must name OpenPost and link the same icon as the browser tab.
+func TestPublicPagesShareOpenPostNameAndIcon(t *testing.T) {
+	static := filepath.Join("..", "..", "..", "web", "static")
+	favicon, err := os.ReadFile(filepath.Join(static, "favicon.ico"))
+	require.NoError(t, err)
+
+	files := fstest.MapFS{
+		"index.html":  {Data: []byte(`<html><head><title>OpenPost</title></head><body><div id="app"></div></body></html>`)},
+		"favicon.ico": {Data: favicon},
+	}
+	for _, name := range []string{"about.html", "privacy.html", "terms.html"} {
+		page, err := os.ReadFile(filepath.Join(static, name))
+		require.NoError(t, err)
+		files[name] = &fstest.MapFile{Data: page}
+		for _, want := range []string{
+			`<link rel="icon" href="/favicon.ico" sizes="any">`,
+			`href="/assets/brand/icon.svg"`,
+			`rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png"`,
+		} {
+			require.Contains(t, string(page), want, name)
+		}
+	}
+	e := echo.New()
+	registerSpaRoutes(e, withAppRoutes(files, "/", "/login"))
+
+	for _, target := range []string{"/", "/login", "/about", "/privacy", "/terms"} {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, target, nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, target)
+		body := rec.Body.String()
+		require.Regexp(t, `<title>[^<]*OpenPost[^<]*</title>`, body, target)
+	}
+	for _, target := range []string{"/", "/login"} {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, target, nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		require.Contains(t, rec.Body.String(), "<h1 style=\"font-size:2rem;line-height:1.2\">OpenPost</h1>", target)
+	}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/favicon.ico", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Header().Get("Content-Type"), "image/")
+	require.Equal(t, favicon, rec.Body.Bytes())
+}
