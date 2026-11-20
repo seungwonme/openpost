@@ -199,6 +199,8 @@ func writeHTMLResponse(c echo.Context, data []byte, managedEdition bool) error {
 func writeHTMLStatusResponse(c echo.Context, data []byte, managedEdition bool, status int, indexable bool) error {
 	if managedEdition {
 		data = renderManagedEditionMetadata(data, normalizedRequestPath(c.Request().URL))
+	} else {
+		data = renderBrandShell(data, normalizedRequestPath(c.Request().URL))
 	}
 	data, contentEncoding, err := compressHTML(data, c.Request().Header.Get("Accept-Encoding"))
 	if err != nil {
@@ -460,6 +462,37 @@ func writeManagedEditionReviewPurchaseTerms(fallback *strings.Builder) {
 	fallback.WriteString(" Cancel before the first charge.</p>")
 }
 
+// brandShell gives crawlers and app reviewers that do not run scripts the product
+// name, a description, and the policy links on the sign-in entry points. The
+// client app removes it as soon as it starts.
+const brandShell = `<main data-openpost-brand-shell style="box-sizing:border-box;max-width:42rem;margin:0 auto;padding:4rem 1.5rem;font:16px/1.6 system-ui,sans-serif;color:CanvasText;background:Canvas">
+		<h1 style="font-size:2rem;line-height:1.2">OpenPost</h1>
+		<p>OpenPost schedules and publishes content across multiple social platforms.</p>
+		<nav aria-label="OpenPost">
+			<a href="/login">Sign in</a>
+			<span aria-hidden="true"> · </span>
+			<a href="/about">About</a>
+			<span aria-hidden="true"> · </span>
+			<a href="/terms">Terms of Service</a>
+			<span aria-hidden="true"> · </span>
+			<a href="/privacy">Privacy Policy</a>
+		</nav>
+	</main>
+	<script data-openpost-brand-shell>
+		document.querySelectorAll('[data-openpost-brand-shell]').forEach((element) => element.remove());
+	</script>`
+
+func renderBrandShell(indexData []byte, requestPath string) []byte {
+	if requestPath != "/" && requestPath != "/login" {
+		return indexData
+	}
+	htmlDocument := string(indexData)
+	if !strings.Contains(htmlDocument, "</body>") || strings.Contains(htmlDocument, "data-openpost-brand-shell") {
+		return indexData
+	}
+	return []byte(strings.Replace(htmlDocument, "</body>", brandShell+"\n</body>", 1))
+}
+
 func renderManagedEditionMetadata(indexData []byte, requestPath string) []byte {
 	htmlDocument := string(indexData)
 	if !strings.Contains(htmlDocument, "<head>") || strings.Contains(htmlDocument, `name="openpost-edition"`) {
@@ -476,6 +509,7 @@ func renderManagedEditionMetadata(indexData []byte, requestPath string) []byte {
 		return []byte(htmlDocument)
 	}
 	if requestPath == "/" {
+		htmlDocument = strings.Replace(htmlDocument, "<title>OpenPost</title>", "", 1)
 		htmlDocument = strings.Replace(htmlDocument, "</head>", managedEditionReviewMetadata+"\n\t</head>", 1)
 	}
 	if !strings.Contains(htmlDocument, "</body>") {

@@ -140,6 +140,7 @@ func TestSpaStaticAssetsPreferPrecompressedImmutableResponses(t *testing.T) {
 
 func TestSpaHTMLDocumentServing(t *testing.T) {
 	const document = `<html><head></head><body>application document with enough repeated content to compress application document</body></html>`
+	servedLogin := string(renderBrandShell([]byte(document), "/login"))
 	webFS := fstest.MapFS{
 		"index.html": {Data: []byte(document)},
 		"login.html": {Data: []byte(document)},
@@ -184,7 +185,7 @@ func TestSpaHTMLDocumentServing(t *testing.T) {
 			require.NoError(t, err)
 			decoded, err := io.ReadAll(reader)
 			require.NoError(t, err)
-			require.Equal(t, document, string(decoded))
+			require.Equal(t, servedLogin, string(decoded))
 		})
 	}
 
@@ -193,7 +194,7 @@ func TestSpaHTMLDocumentServing(t *testing.T) {
 	e.ServeHTTP(plainRec, plainReq)
 	require.Equal(t, http.StatusOK, plainRec.Code)
 	require.Equal(t, "no-cache, no-store, must-revalidate", plainRec.Header().Get("Cache-Control"))
-	require.Equal(t, document, plainRec.Body.String())
+	require.Equal(t, servedLogin, plainRec.Body.String())
 
 	compressed := func(method string) *httptest.ResponseRecorder {
 		req := httptest.NewRequestWithContext(t.Context(), method, "/login", nil)
